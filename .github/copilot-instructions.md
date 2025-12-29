@@ -1,10 +1,11 @@
 <!-- Short, focused instructions for AI coding agents working in this workspace -->
 # Copilot instructions (repo-specific)
 
-This repository currently contains a single Markdown file (`aura1.md`). The guidance below is intentionally strict: it defines the authoritative runtime, persistence, and frontend constraints Copilot must follow for suggested changes.
+Workspace now includes a Rust backend crate (`/backend`), a stubbed frontend (`/frontend`), CI workflow, and the architecture report (`aura1.md`). Guidance below is strict: the Rust backend is the authority; the frontend is client-only.
 
 1. Quick repo summary
-- Repository contents: `aura1.md` (no `src/`, `package.json`, `pyproject.toml`, `Dockerfile`, or `.github/workflows/` detected). If you see other files, treat the Rust backend as authoritative (see below).
+- Layout: `/backend` (aura-backend Axum server), `/frontend` (stub Three.js client, npm build to `frontend/build`), `/scripts` (deploy helper), `.github/workflows/frontend-sync.yml` (CI publish), `aura1.md` (architecture).
+- Cargo workspace root: `Cargo.toml` with member `backend/`.
 
 2. Primary language and authority
 - Primary language: Rust
@@ -49,6 +50,8 @@ This repository currently contains a single Markdown file (`aura1.md`). The guid
   - WebSocket telemetry
   - STT/TTS subprocess orchestration (Ollama client wrappers)
 - CI publishing: `.github/workflows/frontend-sync.yml` builds `frontend/` (when `frontend/package.json` exists) and force-pushes `FRONTEND_BUILD_DIR` (default `frontend/build`) to the web repo using secrets `WEB_REPO`, `WEB_DEPLOY_PAT`, and optional `WEB_REPO_BRANCH`. Keep build artifacts out of this repo.
+- Backend features: enable `persistence` for RocksDB+BLAKE3+MMR scaffolding; `search` for Tantivy; `tls` for axum-server TLS. Example: `cargo run --features "persistence search tls"`.
+- Frontend stub: `cd frontend && npm install && npm run build` (copies `public/index.html` to `frontend/build`).
 
 8. Editing and pull requests
 - Do not add large scaffolding without explicit permission. Propose minimal patches with a short test plan.

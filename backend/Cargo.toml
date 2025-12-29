@@ -1,0 +1,43 @@
+[package]
+name = "aura-backend"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "AURA-1 cockpit backend (Axum/Tokio authority)"
+
+[dependencies]
+axum = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+anyhow = { workspace = true }
+
+[dependencies.axum-server]
+workspace = true
+optional = true
+
+[features]
+default = ["telemetry"]
+telemetry = []
+persistence = ["rocksdb", "blake3", "merklemountainrange"]
+search = ["tantivy"]
+tls = ["axum-server"]
+
+[dependencies.rocksdb]
+version = "0.21"
+optional = true
+
+[dependencies.merklemountainrange]
+version = "0.0.1"
+optional = true
+
+[dependencies.blake3]
+version = "1"
+optional = true
+
+[dependencies.tantivy]
+version = "0.22"
+optional = true

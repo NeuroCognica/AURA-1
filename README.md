@@ -1,70 +1,89 @@
 AURA-1
 =======
 
-Repository snapshot and agent rules
+Backend-authoritative Rust workspace with a stubbed Three.js frontend target.
 
-- Primary language: Rust (backend authority)
-- Frontend: TypeScript/JavaScript (Three.js client only)
+Primary stacks
+- Backend (authority): Rust, Axum/Tokio, optional RocksDB/MMR/Tantivy (gated by features).
+- Frontend (client-only): TypeScript/JavaScript, Three.js target (stubbed build).
 
-Build / Run
+Workspace layout
+- `/backend/` — Rust crate (`aura-backend`) with Axum server + optional persistence/search modules.
+- `/frontend/` — Stub web client; `npm run build` copies `public/index.html` into `frontend/build`.
+- `/scripts/` — Ops helpers (`deploy_web.sh` for subtree pushes).
+- `/data/`, `/assets/` — ignored; hold RocksDB/Tantivy and large assets locally.
 
+Backend quickstart
 ```bash
-cargo build --release
-cargo run
+cargo build --release           # build backend only
+cargo run                       # dev run on :8080
+curl -v http://localhost:8080/health   # smoke check
 ```
 
-Service layout (expected)
+Backend features (opt-in)
+- `persistence`: enable RocksDB + BLAKE3 + Merkle Mountain Range scaffold.
+- `search`: enable Tantivy schema/index scaffold.
+- `tls`: enable axum-server TLS.
+Example: `cargo run --features "persistence search tls"`.
 
- - /backend/        # Rust crate (authority)
- - /frontend/       # Three.js client
- - /assets/         # Models, textures, audio
- - /data/           # RocksDB, Tantivy, logs
- - /scripts/        # launch + cert helpers
+Frontend quickstart (stub build for CI)
+```bash
+cd frontend
+npm install
+npm run build   # outputs to frontend/build
+```
+
+Sync / deploy (web repo)
+- CI workflow: `.github/workflows/frontend-sync.yml` (trigger: push to `main` touching `frontend/**`).
+- Secrets: `WEB_REPO` (e.g., `NeuroCognica/AURA-1-web` or full URL) and `WEB_DEPLOY_PAT` (`repo` scope); optional `WEB_REPO_BRANCH` (default `main`), `FRONTEND_BUILD_DIR` (default `frontend/build`).
+- Behavior: installs deps, runs `npm run build`, force-pushes build dir to the web repo branch. If secrets are absent, it builds/notes and skips publish.
+- Manual fallback: `WEB_REPO=git@github.com:NeuroCognica/AURA-1-web.git ./scripts/deploy_web.sh` after `npm run build`.
 
 Repository rule
+- Always update this `README.md` and the web-repo README for any change that affects build, run, or developer workflow.
 
-Always update this `README.md` and the web-repo README for any change that affects build, run, or developer workflow. Include exact commands, env vars, and quick verification steps.
+Implementation roadmap (3 sprints)
+1) Telemetry core: harden Axum WS for head pose/audio channels; add message schema + drop-old policy; add TLS (axum-server).
+2) Persistence + integrity: wire RocksDB column families, append-only log writer, MMR root tracking, integrity endpoint.
+3) Retrieval + inference: add Tantivy indexer (text + embeddings), Ollama/Whisper orchestration, RAG fetch path feeding TTS pipeline.
 
-Sync strategy (web repo <-> local)
+Actionable backlog (initial)
+- Cargo: keep workspace `Cargo.lock` in sync after dependency changes.
+- Backend: implement real telemetry routes with binary audio and JSON pose handling; add `HEADPOSE` + `AUDIO` message types.
+- Persistence: replace stub RocksDB/MMR with disk-backed store + audit log; expose `/integrity/root` endpoint.
+- Search: replace stub Tantivy example with real schema (log_id/timestamp/speaker/content/embedding); add index rebuild command.
+- Frontend: replace stub with Three.js scene + WebSocket client; add Cardboard stereo split + distortion shader.
+- CI: extend workflow to run `cargo test` and `cargo clippy` before publish; add cache for cargo + npm.
 
-Recommended approach: CI-driven sync using GitHub Actions that builds the frontend and pushes the built artifacts to the web repo. This avoids merge drift, keeps the authoritative source in the backend repo, and prevents large binary assets from being checked in.
+Focused code snippets (see `backend/src/main.rs`)
+- Axum WebSocket telemetry handler:
+```rust
+async fn ws_handler(ws: WebSocketUpgrade, ConnectInfo(addr): ConnectInfo<SocketAddr>) -> impl IntoResponse {
+    ws.on_upgrade(move |socket| handle_ws(socket, addr))
+}
+```
+- RocksDB + MMR scaffold (feature `persistence`):
+```rust
+pub fn append_log(&self, key: &[u8], value: &[u8]) -> anyhow::Result<()> {
+    self.db.put(key, value)?;
+    Ok(())
+}
+pub fn push(&mut self, leaf: &[u8]) -> anyhow::Result<Hash> {
+    let digest = blake3::hash(leaf);
+    self.inner.push(digest.as_bytes().to_vec())?;
+    Ok(digest)
+}
+```
+- Tantivy index example (feature `search`):
+```rust
+let schema = build_schema();
+let index = Index::create_in_dir(temp_dir, schema.clone())?;
+let mut writer = index.writer(50_000_000)?;
+writer.add_document(doc!(schema.get_field("content").unwrap() => "hello aura"))?;
+writer.commit()?;
+```
 
-Why this approach
-- Automated: CI builds and validates before pushing, so no manual sync steps.
-- Auditable: commits to the web repo are produced by CI, preserving provenance.
-- Safe: large assets and local DBs remain in `.gitignore` and are not accidentally committed.
-
-Two common implementations
-- Git subtree push from CI: build `frontend/`, then `git subtree push --prefix frontend/build <web-repo> main` to update the web repo branch.
-- CI push with PAT: build artifacts and use `git` in the workflow (with a deploy token) to commit the `build/` output to the web repo.
-
-Quick CI checklist
-- Add a GitHub Actions workflow that:
-	1. Checks out the repo.
-	2. Installs Node and builds `/frontend/` (if present).
-	3. Verifies artifacts.
-	4. Pushes `frontend/build` to the web repo (subtree or direct push with token).
-
-CI: `frontend-sync` workflow (scaffolded)
-- Location: `.github/workflows/frontend-sync.yml`.
-- Trigger: pushes to `main` that touch `frontend/**` (or manual `workflow_dispatch`).
-- Gate: job runs only if a frontend lockfile/package.json exists.
-- Secrets required: `WEB_REPO` (e.g., `NeuroCognica/AURA-1-web` or full URL) and `WEB_DEPLOY_PAT` (PAT with `repo` scope) to push built assets; optional `WEB_REPO_BRANCH` (default `main`) and `FRONTEND_BUILD_DIR` (default `frontend/build`).
-- Behavior: installs frontend deps, runs `npm run build`, force-pushes the build dir to `WEB_REPO_BRANCH`. If secrets are missing, it skips publish and logs a note.
-
-Local workflow (Codex + VS Code)
-- Keep `frontend/` as a working folder; do not commit `frontend/build` or large assets — they are ignored.
-- This repo includes local VS Code tasks at `.vscode/tasks.json` to help build and run the project:
-	- `Cargo: Build (release)` — `cargo build --release`
-	- `Cargo: Run (dev)` — `cargo run`
-	- `Frontend: npm install` — `cd frontend && npm ci`
-	- `Frontend: build` — `cd frontend && npm run build`
-	- `Dev: Full (backend + frontend watch)` — convenience wrapper
-- When using the Codex / ChatGPT VS Code extension interactively:
-	1. Open the workspace in VS Code.
-	2. Run `Cargo: Run (dev)` to start the backend dev server.
-	3. In a second terminal or by running the `Frontend: build` task, build or run the frontend dev server.
-	4. Use Codex for snippet generation, refactors, or tests — abide by `.github/copilot-instructions.md` rules.
-- Ensure `frontend/package.json` and a lockfile exist before expecting CI to publish; CI skips if they are absent.
-- For manual web pushes (if CI tokens are unavailable), use `git subtree push --prefix frontend/build <web-repo> <branch>` or a short script in `scripts/` that mirrors the CI steps.
-
+Focused code references
+- Axum WebSocket handler: `backend/src/main.rs` (`/ws/telemetry`).
+- RocksDB + MMR scaffold (feature `persistence`): `backend/src/main.rs` module `storage`.
+- Tantivy mini example (feature `search`): `backend/src/main.rs` module `search`.

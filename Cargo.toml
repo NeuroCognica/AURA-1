@@ -1,0 +1,20 @@
+[workspace]
+members = ["backend"]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "MIT OR Apache-2.0"
+authors = ["90DegreeRobotics <holtmichael1@gmail.com>"]
+description = "AURA-1 cockpit workspace (backend authority + web client)"
+
+[workspace.dependencies]
+axum = { version = "0.7", features = ["ws", "macros", "json"] }
+axum-server = { version = "0.6", features = ["tls-rustls"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
+uuid = { version = "1", features = ["v4"] }
+anyhow = "1"
