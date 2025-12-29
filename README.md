@@ -54,7 +54,17 @@ CI: `frontend-sync` workflow (scaffolded)
 
 Local workflow (Codex + VS Code)
 - Keep `frontend/` as a working folder; do not commit `frontend/build` or large assets — they are ignored.
-- When coding with the Codex VS Code extension, pin to the Rust-backend authority: run `cargo build --release` for verification; run `npm run build` inside `frontend/` to mirror CI output.
+- This repo includes local VS Code tasks at `.vscode/tasks.json` to help build and run the project:
+	- `Cargo: Build (release)` — `cargo build --release`
+	- `Cargo: Run (dev)` — `cargo run`
+	- `Frontend: npm install` — `cd frontend && npm ci`
+	- `Frontend: build` — `cd frontend && npm run build`
+	- `Dev: Full (backend + frontend watch)` — convenience wrapper
+- When using the Codex / ChatGPT VS Code extension interactively:
+	1. Open the workspace in VS Code.
+	2. Run `Cargo: Run (dev)` to start the backend dev server.
+	3. In a second terminal or by running the `Frontend: build` task, build or run the frontend dev server.
+	4. Use Codex for snippet generation, refactors, or tests — abide by `.github/copilot-instructions.md` rules.
 - Ensure `frontend/package.json` and a lockfile exist before expecting CI to publish; CI skips if they are absent.
 - For manual web pushes (if CI tokens are unavailable), use `git subtree push --prefix frontend/build <web-repo> <branch>` or a short script in `scripts/` that mirrors the CI steps.
 
