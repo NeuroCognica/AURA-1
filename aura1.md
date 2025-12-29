@@ -212,7 +212,7 @@ The search schema must be carefully defined to support both full-text search (FT
 
 ### **5.3 Vector Search and RAG**
 
-The AURA-1 system requires semantic understanding. Tantivy 0.21 introduced experimental support for vector search, and related crates extend this capability.10
+The AURA-1 system requires semantic understanding. Tantivy 0.22 introduced experimental support for vector search, and related crates extend this capability.10
 
 #### **5.3.1 The Vector Pipeline**
 
@@ -416,7 +416,7 @@ axum \= { version \= "0.7", features \= \["ws"\] }
 axum-server \= { version \= "0.6", features \= \["tls-rustls"\] }  
 rocksdb \= "0.21"  
 rs-merkle \= "1.4"  
-tantivy \= { version \= "0.21", features \= \["mmap"\] }  
+tantivy \= { version \= "0.22", features \= \["mmap"\] }  
 ollama-rs \= "0.1"  
 whisper-rs \= "0.11"  
 serde \= { version \= "1.0", features \= \["derive"\] }  
