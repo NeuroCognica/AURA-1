@@ -1,0 +1,54 @@
+# Rust
+/target/
+**/target/
+
+# Node / frontend
+/node_modules/
+/frontend/node_modules/
+/frontend/dist/
+/frontend/build/
+
+# Build outputs
+/dist/
+/build/
+
+# Data and DBs (do not commit RocksDB or Tantivy store files)
+/data/
+
+# Large/derived assets (models, compiled blobs) — user can obtain or build these externally
+/assets/models/
+/assets/*.glb
+/assets/*.gltf
+/assets/*.fbx
+/assets/*.obj
+/assets/*.bin
+/assets/*.onnx
+/assets/*.tflite
+
+# Editor/IDE
+/.vscode/
+/.idea/
+*.iml
+
+# Environment
+.env
+.env.local
+
+# Logs and temp
+*.log
+*.tmp
+*.cache
+
+# System
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.pyc
+
+# Binaries
+*.exe
+*.dll
+*.so
+*.dylib
