@@ -1,3 +1,70 @@
+name: Frontend Sync
+
+on:
+  push:
+    paths:
+      - 'frontend/**'
+  workflow_dispatch:
+
+jobs:
+  build_and_publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install frontend dependencies (if present)
+        run: |
+          if [ -f frontend/package.json ]; then
+            cd frontend
+            npm ci
+          else
+            echo "No frontend/package.json found, skipping"
+            exit 0
+          fi
+
+      - name: Build frontend
+        run: |
+          cd frontend
+          npm run build
+
+      - name: Prepare publish
+        env:
+          FRONTEND_BUILD_DIR: ${{ env.FRONTEND_BUILD_DIR || 'frontend/build' }}
+        run: |
+          if [ ! -d "$FRONTEND_BUILD_DIR" ]; then
+            echo "Build dir $FRONTEND_BUILD_DIR not found"
+            exit 1
+          fi
+
+      - name: Publish to web repo (requires secrets)
+        if: secrets.WEB_DEPLOY_PAT && secrets.WEB_REPO
+        env:
+          WEB_REPO: ${{ secrets.WEB_REPO }}
+          WEB_DEPLOY_PAT: ${{ secrets.WEB_DEPLOY_PAT }}
+          WEB_REPO_BRANCH: ${{ secrets.WEB_REPO_BRANCH || 'main' }}
+          FRONTEND_BUILD_DIR: ${{ secrets.FRONTEND_BUILD_DIR || 'frontend/build' }}
+        run: |
+          git config --global user.email "actions@github.com"
+          git config --global user.name "github-actions[bot]"
+          echo "Cloning target repo: $WEB_REPO"
+          git clone --depth=1 https://${WEB_DEPLOY_PAT}@github.com/${WEB_REPO}.git web-repo
+          rm -rf web-repo/*
+          cp -R ${FRONTEND_BUILD_DIR}/. web-repo/
+          cd web-repo
+          git add -A
+          git commit -m "chore: deploy frontend build from $GITHUB_SHA" || echo "no changes to commit"
+          git push origin ${WEB_REPO_BRANCH} --force
+
+      - name: Publish skipped notice
+        if: !secrets.WEB_DEPLOY_PAT || !secrets.WEB_REPO
+        run: |
+          echo "WEB_REPO or WEB_DEPLOY_PAT secrets are not set. Skipping publish step."
 name: frontend-sync
 
 on:
