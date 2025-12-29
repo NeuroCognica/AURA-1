@@ -60,3 +60,4 @@ __pycache__/
 *.dll
 *.so
 *.dylib
+backend/data/
