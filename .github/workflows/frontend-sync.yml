@@ -1,0 +1,93 @@
+name: frontend-sync
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'frontend/**'
+      - 'scripts/**'
+      - '.github/workflows/frontend-sync.yml'
+  workflow_dispatch:
+
+jobs:
+  build-and-publish:
+    if: ${{ hashFiles('frontend/package.json', 'frontend/pnpm-lock.yaml', 'frontend/yarn.lock', 'frontend/package-lock.json') != '' }}
+    runs-on: ubuntu-latest
+    env:
+      WEB_REPO: ${{ secrets.WEB_REPO }}
+      WEB_DEPLOY_PAT: ${{ secrets.WEB_DEPLOY_PAT }}
+      WEB_REPO_BRANCH: ${{ vars.WEB_REPO_BRANCH || 'main' }}
+      FRONTEND_BUILD_DIR: ${{ vars.FRONTEND_BUILD_DIR || 'frontend/build' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Decide publish target
+        id: publish_guard
+        run: |
+          if [ -z "$WEB_REPO" ] || [ -z "$WEB_DEPLOY_PAT" ]; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "WEB_REPO or WEB_DEPLOY_PAT missing; build/publish skipped."
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup Node
+        if: steps.publish_guard.outputs.publish == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        if: steps.publish_guard.outputs.publish == 'true'
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
+        working-directory: frontend
+
+      - name: Build frontend
+        if: steps.publish_guard.outputs.publish == 'true'
+        run: npm run build
+        working-directory: frontend
+
+      - name: Publish build to web repo
+        if: steps.publish_guard.outputs.publish == 'true'
+        env:
+          GIT_AUTHOR_NAME: github-actions[bot]
+          GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+          GIT_COMMITTER_NAME: github-actions[bot]
+          GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+        run: |
+          if [ ! -d "$FRONTEND_BUILD_DIR" ]; then
+            echo "Expected build output at $FRONTEND_BUILD_DIR but directory is missing."
+            exit 1
+          fi
+          publish_dir="$(mktemp -d)"
+          rsync -a --delete "$FRONTEND_BUILD_DIR"/ "$publish_dir"/
+
+          remote_url="$WEB_REPO"
+          if [[ "$remote_url" != https://* && "$remote_url" != git@* ]]; then
+            remote_url="https://github.com/${remote_url}"
+          fi
+
+          cd "$publish_dir"
+          git init
+          git checkout -b "$WEB_REPO_BRANCH"
+          git config user.name "$GIT_AUTHOR_NAME"
+          git config user.email "$GIT_AUTHOR_EMAIL"
+          git add .
+          git commit -m "chore: publish frontend build from ${GITHUB_SHA}"
+          git remote add origin "https://${WEB_DEPLOY_PAT}@${remote_url#https://}"
+          git push --force origin "$WEB_REPO_BRANCH"
+
+      - name: Build-only note
+        if: steps.publish_guard.outputs.publish == 'false'
+        run: |
+          echo "WEB_REPO/WEB_DEPLOY_PAT not set; frontend build/publish skipped."

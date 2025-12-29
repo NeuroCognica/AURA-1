@@ -48,6 +48,7 @@ This repository currently contains a single Markdown file (`aura1.md`). The guid
   - Axum HTTPS server
   - WebSocket telemetry
   - STT/TTS subprocess orchestration (Ollama client wrappers)
+- CI publishing: `.github/workflows/frontend-sync.yml` builds `frontend/` (when `frontend/package.json` exists) and force-pushes `FRONTEND_BUILD_DIR` (default `frontend/build`) to the web repo using secrets `WEB_REPO`, `WEB_DEPLOY_PAT`, and optional `WEB_REPO_BRANCH`. Keep build artifacts out of this repo.
 
 8. Editing and pull requests
 - Do not add large scaffolding without explicit permission. Propose minimal patches with a short test plan.
@@ -56,6 +57,7 @@ This repository currently contains a single Markdown file (`aura1.md`). The guid
 9. CI / debug / test troubleshooting
 - Inspect `.github/workflows/*.yml` for build steps before modifying CI.
 - When debugging failing tests, run the specific failing `cargo` test locally and report stack traces and backtraces.
+- If CI publish skips, check that `frontend/package.json` exists and `WEB_REPO`/`WEB_DEPLOY_PAT` secrets are set; build output must land in `FRONTEND_BUILD_DIR`.
 
 10. When to ask the user (prioritize these questions)
 - Where is the application source and which folder is the workspace root?
@@ -65,6 +67,7 @@ This repository currently contains a single Markdown file (`aura1.md`). The guid
 11. Safe defaults
 - Do not run arbitrary shell commands without explicit permission.
 - Do not change data storage layers or introduce new datastore types without approval.
+- Do not commit large assets, model files, RocksDB/Tantivy data, or generated frontend builds; `.gitignore` excludes these.
 
 - Repository rule: Always update `README.md` in the project (and the web repo counterpart) for any change that affects build, run, or developer workflow. Document commands, service endpoints, and any environment variables added or changed.
 

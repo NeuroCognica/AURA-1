@@ -45,6 +45,16 @@ Quick CI checklist
 	3. Verifies artifacts.
 	4. Pushes `frontend/build` to the web repo (subtree or direct push with token).
 
-Local workflow
-- Developers should keep `frontend/` as a working folder and run local builds; do not commit `frontend/build` or large assets — they are in `.gitignore`.
+CI: `frontend-sync` workflow (scaffolded)
+- Location: `.github/workflows/frontend-sync.yml`.
+- Trigger: pushes to `main` that touch `frontend/**` (or manual `workflow_dispatch`).
+- Gate: job runs only if a frontend lockfile/package.json exists.
+- Secrets required: `WEB_REPO` (e.g., `NeuroCognica/AURA-1-web` or full URL) and `WEB_DEPLOY_PAT` (PAT with `repo` scope) to push built assets; optional `WEB_REPO_BRANCH` (default `main`) and `FRONTEND_BUILD_DIR` (default `frontend/build`).
+- Behavior: installs frontend deps, runs `npm run build`, force-pushes the build dir to `WEB_REPO_BRANCH`. If secrets are missing, it skips publish and logs a note.
+
+Local workflow (Codex + VS Code)
+- Keep `frontend/` as a working folder; do not commit `frontend/build` or large assets — they are ignored.
+- When coding with the Codex VS Code extension, pin to the Rust-backend authority: run `cargo build --release` for verification; run `npm run build` inside `frontend/` to mirror CI output.
+- Ensure `frontend/package.json` and a lockfile exist before expecting CI to publish; CI skips if they are absent.
+- For manual web pushes (if CI tokens are unavailable), use `git subtree push --prefix frontend/build <web-repo> <branch>` or a short script in `scripts/` that mirrors the CI steps.
 
