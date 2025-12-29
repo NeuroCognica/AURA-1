@@ -1,0 +1,50 @@
+name: Persistence Tests
+
+on:
+  push:
+    paths:
+      - 'backend/**'
+  pull_request:
+    paths:
+      - 'backend/**'
+
+jobs:
+  test-persistence-ubuntu:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config libssl-dev libsnappy-dev zlib1g-dev libbz2-dev liblz4-dev libzstd-dev
+      - name: Cargo test (persistence)
+        working-directory: backend
+        run: cargo test --features persistence --tests --verbose
+
+  test-persistence-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+      - name: Bootstrap vcpkg and install native deps
+        shell: pwsh
+        run: |
+          git clone https://github.com/microsoft/vcpkg.git vcpkg
+          .\vcpkg\bootstrap-vcpkg.bat
+          .\vcpkg\vcpkg.exe install zlib lz4 zstd bzip2 snappy
+      - name: Set VCPKG_ROOT
+        shell: pwsh
+        run: |
+          echo "::add-path::${{ github.workspace }}\\vcpkg"
+      - name: Cargo test (persistence) on Windows
+        working-directory: backend
+        run: cargo test --features persistence --tests --verbose
