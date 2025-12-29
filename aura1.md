@@ -110,6 +110,23 @@ The AURA-1 workload is characterized by:
 * **Block Cache**: Allocate a dedicated block cache (e.g., 512MB) shared across column families to keep the "hot" recent conversation history in memory.  
 * **Compression**: Use **LZ4** for the bottommost levels of the LSM tree. Text logs compress highly effectively, saving significant disk space on the local device without incurring the CPU penalty of Zstd.4
 
+#### **3.4 Run & Test (persistence feature)**
+
+Quick commands to build, run, and test the backend with the `persistence` feature enabled. These are the canonical local steps used during development and CI.
+
+- **Build (release):** `cargo build --release`
+- **Run (dev) with persistence:** `cargo run --features "persistence search tls"`
+- **Run tests (persistence):** `cargo test --features persistence`
+- **Start detached (PowerShell):**
+
+```powershell
+Start-Process powershell -ArgumentList '-NoExit','-Command','cd C:/AURA-1/backend; cargo run --features persistence'
+```
+
+Notes:
+- The `persistence` feature enables RocksDB-backed storage and MMR integrity checks. Ensure native RocksDB dependencies are available on your platform when building.
+- Use `mkcert` and TLS when testing sensor or microphone access from remote devices (see section 8.3.2).
+
 ## ---
 
 **4\. Cryptographic Integrity: Merkle Mountain Ranges**
