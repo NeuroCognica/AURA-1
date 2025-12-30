@@ -26,6 +26,10 @@ mod telemetry;
 use crate::telemetry::Pose;
 mod broadcast;
 use crate::broadcast as broadcast_mod;
+#[cfg(feature = "persistence")]
+mod ollama;
+#[cfg(feature = "persistence")]
+use crate::ollama as ollama_mod;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
