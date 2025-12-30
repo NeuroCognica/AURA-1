@@ -2,8 +2,15 @@ use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::response::IntoResponse;
 use axum::Extension;
 use futures_util::StreamExt;
-use futures_util::sink::SinkExt;
 use std::sync::Arc;
+
+// `storage::RocksStore` is only available when the `persistence` feature
+// is enabled. Guard the import so this file compiles regardless of
+// whether the feature is active.
+#[cfg(feature = "persistence")]
+use crate::storage::RocksStore;
+use serde_json::Value as JsonValue;
+use crate::council_verdict::{CouncilWsMsg, CouncilEnvelope, CouncilClientMsg, CouncilMsgType, now_ms};
 use tokio::sync::broadcast;
 use tracing::{info, warn};
 
@@ -78,9 +85,10 @@ async fn handle_client(mut socket: WebSocket, mut rx: broadcast::Receiver<String
 pub async fn ws_ai_handler(
     ws: WebSocketUpgrade,
     Extension(ai_bcast): Extension<broadcast::Sender<String>>,
+    Extension(council_bcast): Extension<broadcast::Sender<String>>,
 ) -> impl IntoResponse {
     // Upgrade and hand off to handler that attaches sequencing/acking semantics
-    ws.on_upgrade(move |socket| handle_ai_socket(socket, ai_bcast))
+    ws.on_upgrade(move |socket| handle_ai_socket(socket, ai_bcast, council_bcast))
 }
 
 pub async fn ws_council_handler(
@@ -90,30 +98,94 @@ pub async fn ws_council_handler(
     ws.on_upgrade(move |socket| handle_council_socket(socket, council_bcast))
 }
 
+/// Build a minimal, non-authoritative AI notice from a stored `CouncilWsMsg` JSON string.
+/// Returns `Some(String)` JSON notice when `msg` is an `interrupt`, otherwise `None`.
+pub fn build_ai_interrupt_notice_from_council(msg: &str) -> Option<String> {
+    if let Ok(cmsg) = serde_json::from_str::<crate::council_verdict::CouncilWsMsg>(msg) {
+        if cmsg.kind != "interrupt" {
+            return None;
+        }
+        // Extract minimal fields: kind, scope, reason, correlation (if present)
+        let payload = cmsg.payload;
+        let kind = payload.get("kind").and_then(|v| v.as_str()).unwrap_or("interrupt");
+        let scope = payload.get("scope").cloned().unwrap_or(serde_json::json!(null));
+        let reason = payload.get("reason").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let correlation = payload.get("correlation").cloned().unwrap_or(serde_json::json!(null));
+
+        let notice = serde_json::json!({
+            "type": "notice",
+            "notice": "interrupt",
+            "payload": { "kind": kind, "scope": scope, "reason": reason, "correlation": correlation }
+        });
+        return Some(notice.to_string());
+    }
+    None
+}
+
 async fn handle_council_socket(mut socket: WebSocket, council_bcast: broadcast::Sender<String>) {
     info!("council client socket connected");
     let mut rx = council_bcast.subscribe();
-
-    // sequencing for council events
+    // sequencing for council events (per-connection view)
     let mut seq: u64 = 0;
+    let mut last_acked: u64 = 0;
+    let mut last_sent: u64 = 0;
+
     loop {
         tokio::select! {
             biased;
             recv = rx.recv() => {
                 match recv {
                     Ok(msg) => {
-                        seq = seq.wrapping_add(1);
-                        let envelope = serde_json::json!({"seq": seq, "type": "council", "payload": msg});
-                        let s = envelope.to_string();
-                        if socket.send(Message::Text(s)).await.is_err() {
-                            break;
+                        // msg is the stored CouncilWsMsg JSON string produced by broadcast_council.
+                        // Try to parse it and build a richer envelope for clients.
+                        if let Ok(cmsg) = serde_json::from_str::<CouncilWsMsg>(&msg) {
+                            seq = seq.wrapping_add(1);
+                            last_sent = seq;
+                            // map kind string to CouncilMsgType (best-effort)
+                            let mtype = match cmsg.kind.as_str() {
+                                "verdict" => CouncilMsgType::Verdict,
+                                "appeal_state" => CouncilMsgType::AppealState,
+                                "sentinel_notice" => CouncilMsgType::SentinelNotice,
+                                "interrupt" => CouncilMsgType::Interrupt,
+                                _ => CouncilMsgType::SentinelNotice,
+                            };
+
+                            let env = CouncilEnvelope {
+                                seq,
+                                msg_type: mtype,
+                                ts_ms: now_ms(),
+                                sid: cmsg.session_id.clone(),
+                                vid: None,
+                                payload: cmsg.payload,
+                            };
+
+                            if let Ok(s) = serde_json::to_string(&env) {
+                                if socket.send(Message::Text(s)).await.is_err() {
+                                    break;
+                                }
+                            }
+
+                            // simple lag detection
+                            let lag = last_sent.saturating_sub(last_acked);
+                            if lag > 2000 {
+                                let _ = socket.send(Message::Close(None)).await;
+                                break;
+                            }
+                        } else {
+                            // fallback: send raw wrapped council message
+                            seq = seq.wrapping_add(1);
+                            last_sent = seq;
+                            let envelope = serde_json::json!({"seq": seq, "type": "council", "ts_ms": now_ms(), "payload": msg});
+                            let s = envelope.to_string();
+                            if socket.send(Message::Text(s)).await.is_err() {
+                                break;
+                            }
                         }
                     }
                     Err(broadcast::error::RecvError::Lagged(n)) => {
                         warn!("council subscriber lagged by {} messages", n);
-                        let notice = serde_json::json!({"type": "notice", "notice": "lag", "lag_count": n, "seq": seq}).to_string();
-                        let _ = socket.send(Message::Text(notice)).await;
-                        continue;
+                        let _ = socket.send(Message::Close(None)).await;
+                        break;
                     }
                     Err(broadcast::error::RecvError::Closed) => break,
                 }
@@ -121,12 +193,18 @@ async fn handle_council_socket(mut socket: WebSocket, council_bcast: broadcast::
             ws_msg = socket.next() => {
                 match ws_msg {
                     Some(Ok(Message::Text(txt))) => {
-                        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&txt) {
-                            if let Some(ack) = v.get("ack").and_then(|a| a.as_u64()) {
-                                info!("council ack {} received", ack);
+                        if let Ok(client_msg) = serde_json::from_str::<CouncilClientMsg>(&txt) {
+                            match client_msg {
+                                CouncilClientMsg::Ack { ack, sid: _ } => {
+                                    if ack > last_acked { last_acked = ack; }
+                                }
+                                CouncilClientMsg::Hello { sid: _, last_ack } => {
+                                    if let Some(a) = last_ack { last_acked = a; }
+                                }
                             }
+                        } else if let Ok(v) = serde_json::from_str::<serde_json::Value>(&txt) {
                             if v.get("ping").is_some() {
-                                let _ = socket.send(Message::Text(serde_json::json!({"pong": true, "seq": seq}).to_string())).await;
+                                let _ = socket.send(Message::Text(serde_json::json!({"pong": true, "last_acked": last_acked}).to_string())).await;
                             }
                         }
                     }
@@ -140,9 +218,10 @@ async fn handle_council_socket(mut socket: WebSocket, council_bcast: broadcast::
     info!("council client socket disconnected");
 }
 
-async fn handle_ai_socket(mut socket: WebSocket, ai_bcast: broadcast::Sender<String>) {
+async fn handle_ai_socket(mut socket: WebSocket, ai_bcast: broadcast::Sender<String>, council_bcast: broadcast::Sender<String>) {
     info!("ai client socket connected");
     let mut rx = ai_bcast.subscribe();
+    let mut council_rx = council_bcast.subscribe();
     // Simple sequencing: attach a monotonically increasing seq to outgoing deltas.
     let mut seq: u64 = 0;
     loop {
@@ -166,6 +245,29 @@ async fn handle_ai_socket(mut socket: WebSocket, ai_bcast: broadcast::Sender<Str
                         continue;
                     }
                     Err(broadcast::error::RecvError::Closed) => break,
+                }
+            }
+            // Listen for council events and forward minimal interrupt notices to ai client
+            council = council_rx.recv() => {
+                match council {
+                    Ok(msg) => {
+                        // try parse as CouncilWsMsg; only act on kind == "interrupt"
+                        if let Ok(cmsg) = serde_json::from_str::<crate::council_verdict::CouncilWsMsg>(&msg) {
+                                if cmsg.kind == "interrupt" {
+                                    // Build a minimal, non-authoritative notice for ai clients.
+                                    let minimal = crate::broadcast::build_ai_interrupt_notice_from_council(&msg);
+                                    if let Some(n) = minimal {
+                                        let _ = socket.send(Message::Text(n)).await;
+                                    }
+                                }
+                        }
+                    }
+                    Err(broadcast::error::RecvError::Lagged(n)) => {
+                        warn!("ai-council subscription lagged by {} messages", n);
+                        // don't force close; just warn
+                        continue;
+                    }
+                    Err(broadcast::error::RecvError::Closed) => {},
                 }
             }
             // handle client-side messages (acks, heartbeats, or disconnect)
@@ -192,4 +294,127 @@ async fn handle_ai_socket(mut socket: WebSocket, ai_bcast: broadcast::Sender<Str
         }
     }
     info!("ai client socket disconnected");
+}
+
+/// Helper to persist and broadcast a Council message.
+/// Serializes a `CouncilWsMsg`, appends it to the session `council` chat log,
+/// and sends the JSON string on the provided `council_bcast` channel.
+// Implementation when `persistence` feature is enabled: persist to RocksDB
+// and broadcast the stored JSON string.
+#[cfg(feature = "persistence")]
+pub fn broadcast_council(
+    store: &Arc<RocksStore>,
+    council_bcast: &broadcast::Sender<String>,
+    session_id: &str,
+    kind: &str,
+    payload: JsonValue,
+    gen_mgr: Option<&Arc<crate::generation_manager::GenerationManager>>,
+) {
+    // Build typed message
+    let msg = crate::council_verdict::CouncilWsMsg {
+        kind: kind.to_string(),
+        session_id: session_id.to_string(),
+        payload: payload.clone(),
+    };
+
+    match serde_json::to_string(&msg) {
+        Ok(s) => {
+            if let Err(e) = store.append_chat_msg(session_id, "council", &s) {
+                warn!(%e, "failed to append council message");
+            }
+            if let Err(e) = council_bcast.send(s.clone()) {
+                warn!("council broadcast send failed: {}", e);
+            }
+
+            // Enforcement hook: if this council message requires blocking, cancel any active generation
+            if let Some(gm) = gen_mgr {
+                // Decide blocking criteria: verdict denies or require_consent, or interrupt
+                match kind {
+                    "verdict" => {
+                        if let Some(decision) = payload.get("final_state").and_then(|v| v.as_str()) {
+                            if decision == "deny" || decision == "require_consent" {
+                                let sid = session_id.to_string();
+                                let gm = gm.clone();
+                                tokio::spawn(async move { gm.cancel(&sid).await; });
+                            }
+                        } else if let Some(decision) = payload.get("decision").and_then(|v| v.as_str()) {
+                            if decision == "deny" || decision == "require_consent" {
+                                let sid = session_id.to_string();
+                                let gm = gm.clone();
+                                tokio::spawn(async move { gm.cancel(&sid).await; });
+                            }
+                        }
+                    }
+                    "interrupt" => {
+                        let sid = session_id.to_string();
+                        let gm = gm.clone();
+                        tokio::spawn(async move { gm.cancel(&sid).await; });
+                    }
+                    _ => {}
+                }
+            }
+        }
+        Err(e) => {
+            warn!(%e, "failed to serialize council message");
+        }
+    }
+}
+
+// Fallback implementation when `persistence` is NOT enabled. This keeps a
+// compatible symbol so callers need not be changed for builds that omit
+// persistence. We skip any RocksDB persistence and only broadcast the
+// message; enforcement cancellation logic is preserved.
+#[cfg(not(feature = "persistence"))]
+pub fn broadcast_council(
+    _store: &Arc<()>,
+    council_bcast: &broadcast::Sender<String>,
+    session_id: &str,
+    kind: &str,
+    payload: JsonValue,
+    gen_mgr: Option<&Arc<crate::generation_manager::GenerationManager>>,
+) {
+    // Build typed message
+    let msg = crate::council_verdict::CouncilWsMsg {
+        kind: kind.to_string(),
+        session_id: session_id.to_string(),
+        payload: payload.clone(),
+    };
+
+    match serde_json::to_string(&msg) {
+        Ok(s) => {
+            if let Err(e) = council_bcast.send(s.clone()) {
+                warn!("council broadcast send failed: {}", e);
+            }
+
+            // Enforcement hook: preserve cancellation behavior even without persistence
+            if let Some(gm) = gen_mgr {
+                match kind {
+                    "verdict" => {
+                        if let Some(decision) = payload.get("final_state").and_then(|v| v.as_str()) {
+                            if decision == "deny" || decision == "require_consent" {
+                                let sid = session_id.to_string();
+                                let gm = gm.clone();
+                                tokio::spawn(async move { gm.cancel(&sid).await; });
+                            }
+                        } else if let Some(decision) = payload.get("decision").and_then(|v| v.as_str()) {
+                            if decision == "deny" || decision == "require_consent" {
+                                let sid = session_id.to_string();
+                                let gm = gm.clone();
+                                tokio::spawn(async move { gm.cancel(&sid).await; });
+                            }
+                        }
+                    }
+                    "interrupt" => {
+                        let sid = session_id.to_string();
+                        let gm = gm.clone();
+                        tokio::spawn(async move { gm.cancel(&sid).await; });
+                    }
+                    _ => {}
+                }
+            }
+        }
+        Err(e) => {
+            warn!(%e, "failed to serialize council message");
+        }
+    }
 }
