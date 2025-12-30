@@ -195,7 +195,7 @@ async fn main() -> anyhow::Result<()> {
                     async move {
                         match store.prove(id) {
                             Ok(Some((leaf, peaks))) => {
-                                let resp = serde_json::json!({"leaf": base64::encode(leaf), "peaks": peaks});
+                                let resp = serde_json::json!({"leaf": base64::engine::general_purpose::STANDARD.encode(leaf), "peaks": peaks});
                                 (axum::http::StatusCode::OK, serde_json::to_string(&resp).unwrap())
                             }
                             Ok(None) => (axum::http::StatusCode::NOT_FOUND, "not found".to_string()),
