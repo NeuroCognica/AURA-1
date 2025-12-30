@@ -137,7 +137,7 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
         }))
-        .route("/api/chat", axum::routing::post(crate::ollama::chat_handler))
+        
         .route("/", get(|| async { "AURA-1 backend prototype" }));
 
     #[cfg(feature = "persistence")]
@@ -213,6 +213,8 @@ async fn main() -> anyhow::Result<()> {
                     }
                 }
             }))
+            .route("/api/chat", axum::routing::post(crate::ollama::chat_handler))
+            .layer(Extension(store.clone()))
         
     };
 

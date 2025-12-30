@@ -174,6 +174,72 @@ mod __storage_impl {
                 cp.create_checkpoint(dst)?;
                 Ok(())
         }
+
+            /// Append a chat message to a named session. Returns the session sequence number.
+            pub fn append_chat_msg(&self, session_id: &str, speaker: &str, content: &str) -> anyhow::Result<u64> {
+                let mut batch = WriteBatch::default();
+
+                let state_cf = self.cf_handle("state");
+                let logs_cf = self.cf_handle("logs");
+
+                // key for last seq for this session
+                let last_key = format!("sess_last:{}", session_id);
+
+                let last_seq = match self.db.get_cf(state_cf, last_key.as_bytes())? {
+                    Some(v) if v.len() == 8 => u64::from_be_bytes(v.as_slice().try_into().unwrap()),
+                    _ => 0u64,
+                };
+
+                let new_seq = last_seq + 1;
+
+                let entry = LogEntry {
+                    id: new_seq,
+                    timestamp_ms: chrono::Utc::now().timestamp_millis(),
+                    speaker: speaker.to_string(),
+                    content: content.to_string(),
+                };
+
+                let ser = serde_json::to_vec(&entry)?;
+
+                // composite key: sess:<session_id>:<seq padded>
+                let key = format!("sess:{}:{:020}", session_id, new_seq);
+
+                batch.put_cf(logs_cf, key.as_bytes(), &ser);
+                batch.put_cf(state_cf, last_key.as_bytes(), &new_seq.to_be_bytes());
+
+                // commit batch
+                self.db.write(batch)?;
+
+                Ok(new_seq)
+            }
+
+            /// Load the most recent `limit` chat messages for the given session (ascending order).
+            pub fn load_recent_chat(&self, session_id: &str, limit: usize) -> anyhow::Result<Vec<LogEntry>> {
+                let state_cf = self.cf_handle("state");
+                let logs_cf = self.cf_handle("logs");
+
+                let last_key = format!("sess_last:{}", session_id);
+                let last_seq = match self.db.get_cf(state_cf, last_key.as_bytes())? {
+                    Some(v) if v.len() == 8 => u64::from_be_bytes(v.as_slice().try_into().unwrap()),
+                    _ => 0u64,
+                };
+
+                if last_seq == 0 {
+                    return Ok(Vec::new());
+                }
+
+                let mut out = Vec::new();
+                let start = if last_seq > limit as u64 { last_seq - (limit as u64) + 1 } else { 1 };
+                for seq in start..=last_seq {
+                    let key = format!("sess:{}:{:020}", session_id, seq);
+                    if let Some(v) = self.db.get_cf(logs_cf, key.as_bytes())? {
+                        let le: LogEntry = serde_json::from_slice(&v)?;
+                        out.push(le);
+                    }
+                }
+
+                Ok(out)
+            }
     }
 }
 

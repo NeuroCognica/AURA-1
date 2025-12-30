@@ -121,59 +121,102 @@ async fn stream_ollama_chat(
     Ok(s)
 }
 
-/// Minimal `/api/chat` handler. Expects JSON with: {"ollama_url", "model", "system", "history": [{role,content,ts}], "retrieval": optional string}
+/// Persistence-enabled `/api/chat` handler. Requires `persistence` feature.
+#[cfg(feature = "persistence")]
 pub async fn chat_handler(
     Json(payload): Json<serde_json::Value>,
     Extension(ai_bcast): Extension<broadcast::Sender<String>>,
+    Extension(store): Extension<std::sync::Arc<crate::RocksStore>>,
 ) -> axum::response::Response {
+    // Require `session_id` and `text` fields
+    let session_id = match payload.get("session_id").and_then(|v| v.as_str()) {
+        Some(s) => s.to_string(),
+        None => {
+            return axum::response::Response::builder()
+                .status(axum::http::StatusCode::BAD_REQUEST)
+                .body(axum::body::boxed(axum::body::Full::from("missing session_id")))
+                .unwrap();
+        }
+    };
+
+    let text = match payload.get("text").and_then(|v| v.as_str()) {
+        Some(t) => t.to_string(),
+        None => {
+            return axum::response::Response::builder()
+                .status(axum::http::StatusCode::BAD_REQUEST)
+                .body(axum::body::boxed(axum::body::Full::from("missing text")))
+                .unwrap();
+        }
+    };
+
     let ollama_url = payload
         .get("ollama_url")
         .and_then(|v| v.as_str())
-        .unwrap_or("http://127.0.0.1:11434");
+        .unwrap_or("http://127.0.0.1:11434")
+        .to_string();
     let model = payload
         .get("model")
         .and_then(|v| v.as_str())
-        .unwrap_or("llama2");
+        .unwrap_or("llama2")
+        .to_string();
     let system = payload
         .get("system")
         .and_then(|v| v.as_str())
-        .unwrap_or("AURA persona");
+        .unwrap_or("AURA persona")
+        .to_string();
 
     let retrieval = payload.get("retrieval").and_then(|v| v.as_str()).map(|s| s.to_string());
 
-    let history: Vec<ChatMsg> = payload
-        .get("history")
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|it| {
-                    let role = it.get("role").and_then(|r| r.as_str())?.to_string();
-                    let content = it.get("content").and_then(|c| c.as_str())?.to_string();
-                    let ts = it.get("ts").and_then(|t| t.as_i64()).unwrap_or(0);
-                    Some(ChatMsg { role, content, ts })
-                })
-                .collect()
-        })
-        .unwrap_or_default();
+    // Append user message to session (append-only)
+    if let Err(e) = store.append_chat_msg(&session_id, "user", &text) {
+        warn!(%e, "failed to append user message to RocksDB");
+    }
 
-    // Spawn a task to run the Ollama stream and broadcast deltas.
-    let ollama_url = ollama_url.to_string();
-    let model = model.to_string();
-    let system = system.to_string();
-    let history_clone = history.clone();
-    let retrieval_clone = retrieval.clone();
+    // Load recent history for context (last 20 messages)
+    let recent = match store.load_recent_chat(&session_id, 20) {
+        Ok(v) => v,
+        Err(e) => {
+            warn!(%e, "failed to load recent chat from RocksDB");
+            Vec::new()
+        }
+    };
+
+    // Map storage entries to ChatMsg for the Ollama request
+    let mut history: Vec<ChatMsg> = recent
+        .iter()
+        .map(|le| ChatMsg { role: le.speaker.clone(), content: le.content.clone(), ts: le.timestamp_ms })
+        .collect();
+
+    // Also include any explicit `history` field if provided (appended after persisted history)
+    if let Some(arr) = payload.get("history").and_then(|v| v.as_array()) {
+        for it in arr {
+            if let (Some(role), Some(content)) = (it.get("role").and_then(|r| r.as_str()), it.get("content").and_then(|c| c.as_str())) {
+                history.push(ChatMsg { role: role.to_string(), content: content.to_string(), ts: it.get("ts").and_then(|t| t.as_i64()).unwrap_or(0) });
+            }
+        }
+    }
+
+    // Spawn background task: stream Ollama deltas, broadcast, accumulate, then persist assistant message.
     let bcast = ai_bcast.clone();
+    let session_clone = session_id.clone();
+    let store_clone = store.clone();
+    let retrieval_clone = retrieval.clone();
+    let system_clone = system.clone();
+    let model_clone = model.clone();
+    let ollama_url_clone = ollama_url.clone();
 
     tokio::spawn(async move {
-        match stream_ollama_chat(&ollama_url, &model, &system, retrieval_clone, &history_clone).await {
+        let mut assistant_accum = String::new();
+        match stream_ollama_chat(&ollama_url_clone, &model_clone, &system_clone, retrieval_clone, &history).await {
             Ok(mut s) => {
                 while let Some(chunk) = s.next().await {
                     match chunk {
                         Ok(text) => {
-                            debug!(%text, "ollama delta");
+                            // Broadcast delta to clients
                             if let Err(e) = bcast.send(text.clone()) {
                                 warn!(%e, "broadcast send failed");
                             }
+                            assistant_accum.push_str(&text);
                         }
                         Err(e) => {
                             warn!(%e, "ollama stream chunk parse error");
@@ -181,7 +224,13 @@ pub async fn chat_handler(
                         }
                     }
                 }
-                info!("ollama stream completed");
+
+                info!("ollama stream completed; persisting assistant message");
+                if !assistant_accum.is_empty() {
+                    if let Err(e) = store_clone.append_chat_msg(&session_clone, "assistant", &assistant_accum) {
+                        warn!(%e, "failed to append assistant message to RocksDB");
+                    }
+                }
             }
             Err(e) => {
                 warn!(%e, "failed to start ollama stream");
