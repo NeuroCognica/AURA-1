@@ -1,6 +1,5 @@
 use axum::{extract::Json, Extension};
 use axum::http::StatusCode;
-use bytes::Bytes;
 use futures::{Stream, StreamExt};
 use std::pin::Pin;
 use reqwest::Client;
@@ -9,9 +8,8 @@ use chrono;
 use std::sync::Arc;
 use crate::storage::RocksStore;
 use crate::sentinel::{sentinel_evaluate, sentinel_speak, format_sentinel_block, SentinelDecision};
-use crate::council_verdict::CouncilWsMsg;
 use tokio::sync::broadcast;
-use tracing::{debug, info, warn};
+use tracing::warn;
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct ChatMsg {
@@ -270,6 +268,7 @@ async fn stream_ollama_chat_with_options(
     Extension(store): Extension<Arc<RocksStore>>,
     Extension(ai_bcast): Extension<broadcast::Sender<String>>,
     Extension(council_bcast): Extension<broadcast::Sender<String>>,
+    Extension(gen_mgr): Extension<Arc<crate::generation_manager::GenerationManager>>,
     Json(req): Json<ChatRequest>,
 ) -> impl axum::response::IntoResponse {
     let ts = chrono::Utc::now().timestamp_millis();
@@ -322,10 +321,26 @@ async fn stream_ollama_chat_with_options(
         }
     };
 
-    let mut history: Vec<ChatMsg> = recent
+    let history: Vec<ChatMsg> = recent
         .iter()
         .map(|le| ChatMsg { role: le.speaker.clone(), content: le.content.clone(), ts: le.timestamp_ms })
         .collect();
+
+    // 3. start a new generation and Ollama stream
+    // Register generation with GenerationManager so it can be cancelled by authority events.
+    let (gen_id, cancel) = gen_mgr.start_new(&req.session_id).await;
+
+    // Helper to send a token envelope including gen_id
+    let send_token = |ai_bcast: &broadcast::Sender<String>, gen_id: &str, token: &str| {
+        let env = serde_json::json!({"type": "token", "gen_id": gen_id, "payload": token});
+        let _ = ai_bcast.send(env.to_string());
+    };
+
+    // Helper to send end envelope
+    let send_end = |ai_bcast: &broadcast::Sender<String>, gen_id: &str, reason: &str| {
+        let env = serde_json::json!({"type": "end", "gen_id": gen_id, "reason": reason});
+        let _ = ai_bcast.send(env.to_string());
+    };
 
     // 3. start Ollama stream
     // Prepare Ollama call parameters (used by sentinel speak if needed)
@@ -347,10 +362,7 @@ async fn stream_ollama_chat_with_options(
             }
             let _ = ai_bcast.send(block.clone());
             // also persist and broadcast to council channel as a SentinelNotice
-            if let Ok(payload) = serde_json::to_string(&CouncilWsMsg { kind: "sentinel_notice".to_string(), session_id: req.session_id.clone(), payload: serde_json::json!({"reason": reason, "level": "warning"}) }) {
-                let _ = store.append_chat_msg(&req.session_id, "council", &payload);
-                let _ = council_bcast.send(payload);
-            }
+            crate::broadcast::broadcast_council(&store, &council_bcast, &req.session_id, "sentinel_notice", serde_json::json!({"reason": reason, "level": "warning"}), Some(&gen_mgr));
             // continue to main generation
         }
         SentinelDecision::RequireConsent(reason) => {
@@ -362,10 +374,7 @@ async fn stream_ollama_chat_with_options(
                     let _ = store.append_chat_msg(&req.session_id, "sentinel", &block);
                     let _ = ai_bcast.send(block.clone());
                     // persist + broadcast council notice
-                    if let Ok(payload) = serde_json::to_string(&CouncilWsMsg { kind: "sentinel_speech".to_string(), session_id: req.session_id.clone(), payload: serde_json::json!({"speech": block}) }) {
-                        let _ = store.append_chat_msg(&req.session_id, "council", &payload);
-                        let _ = council_bcast.send(payload);
-                    }
+                    crate::broadcast::broadcast_council(&store, &council_bcast, &req.session_id, "sentinel_speech", serde_json::json!({"speech": block}), Some(&gen_mgr));
                     return (StatusCode::OK, block);
                 }
                 Err(e) => {
@@ -373,10 +382,7 @@ async fn stream_ollama_chat_with_options(
                     let block = format_sentinel_block(&reason, "REQUIRE_CONSENT");
                     let _ = store.append_chat_msg(&req.session_id, "sentinel", &block);
                     let _ = ai_bcast.send(block.clone());
-                    if let Ok(payload) = serde_json::to_string(&CouncilWsMsg { kind: "sentinel_notice".to_string(), session_id: req.session_id.clone(), payload: serde_json::json!({"reason": reason, "level": "require_consent"}) }) {
-                        let _ = store.append_chat_msg(&req.session_id, "council", &payload);
-                        let _ = council_bcast.send(payload);
-                    }
+                    crate::broadcast::broadcast_council(&store, &council_bcast, &req.session_id, "sentinel_notice", serde_json::json!({"reason": reason, "level": "require_consent"}), Some(&gen_mgr));
                     return (StatusCode::OK, block);
                 }
             }
@@ -385,10 +391,7 @@ async fn stream_ollama_chat_with_options(
             let block = format_sentinel_block(&reason, "DENY");
             let _ = store.append_chat_msg(&req.session_id, "sentinel", &block);
             let _ = ai_bcast.send(block.clone());
-            if let Ok(payload) = serde_json::to_string(&CouncilWsMsg { kind: "verdict".to_string(), session_id: req.session_id.clone(), payload: serde_json::json!({"final_state": "deny", "reason": reason}) }) {
-                let _ = store.append_chat_msg(&req.session_id, "council", &payload);
-                let _ = council_bcast.send(payload);
-            }
+            crate::broadcast::broadcast_council(&store, &council_bcast, &req.session_id, "verdict", serde_json::json!({"final_state": "deny", "reason": reason}), Some(&gen_mgr));
             return (StatusCode::FORBIDDEN, block);
         }
     }
@@ -401,17 +404,29 @@ async fn stream_ollama_chat_with_options(
         }
     };
 
-    // 4. stream deltas, broadcast, accumulate
+    // 4. stream deltas, broadcast, accumulate with cancellation
     let mut assistant_buf = String::new();
-    while let Some(delta_res) = stream.next().await {
-        match delta_res {
-            Ok(token) => {
-                assistant_buf.push_str(&token);
-                let _ = ai_bcast.send(token);
+    loop {
+        tokio::select! {
+            biased;
+            _ = cancel.cancelled() => {
+                // generation was cancelled by authority
+                send_end(&ai_bcast, &gen_id, "canceled_by_authority");
+                // do not persist partial assistant_buf; abort
+                return (StatusCode::OK, String::new());
             }
-            Err(e) => {
-                warn!(%e, "error reading stream chunk");
-                return (StatusCode::INTERNAL_SERVER_ERROR, format!("stream chunk error: {}", e));
+            next = stream.next() => {
+                match next {
+                    Some(Ok(token)) => {
+                        assistant_buf.push_str(&token);
+                        send_token(&ai_bcast, &gen_id, &token);
+                    }
+                    Some(Err(e)) => {
+                        warn!(%e, "error reading stream chunk");
+                        return (StatusCode::INTERNAL_SERVER_ERROR, format!("stream chunk error: {}", e));
+                    }
+                    None => break,
+                }
             }
         }
     }

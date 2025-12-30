@@ -1,13 +1,9 @@
 use axum::{
-    extract::ws::{Message, WebSocket, WebSocketUpgrade},
-    extract::ConnectInfo,
     extract::Extension,
-    response::IntoResponse,
     routing::get,
     Json, Router,
 };
 use std::path::Path;
-use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::collections::HashMap;
@@ -31,14 +27,11 @@ mod broadcast;
 use crate::broadcast as broadcast_mod;
 #[cfg(feature = "persistence")]
 mod ollama;
-#[cfg(feature = "persistence")]
-use crate::ollama as ollama_mod;
 mod sentinel;
-use crate::sentinel as sentinel_mod;
 mod council_verdict;
-use crate::council_verdict as council_verdict_mod;
 mod appeal;
-use crate::appeal as appeal_mod;
+mod generation_manager;
+use crate::generation_manager as generation_manager_mod;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -70,6 +63,9 @@ async fn main() -> anyhow::Result<()> {
     let (voice_bcast_tx, _voice_bcast_rx) = tokio::sync::broadcast::channel::<String>(1024);
     let (ai_bcast_tx, _ai_bcast_rx) = tokio::sync::broadcast::channel::<String>(1024);
     let (council_bcast_tx, _council_bcast_rx) = tokio::sync::broadcast::channel::<String>(256);
+
+    // GenerationManager for cancellation / gen_id tracking
+    let gen_mgr = std::sync::Arc::new(generation_manager_mod::GenerationManager::new());
 
     // Load archetypes JSON profiles from repository root `../archetypes` (relative to backend/)
     let archetypes = match load_archetypes("../archetypes") {
@@ -303,9 +299,13 @@ async fn main() -> anyhow::Result<()> {
                 .route("/api/appeal/consent", axum::routing::post({
                     let store = store.clone();
                     let ai_bcast = ai_bcast_tx.clone();
+                    let council_bcast = council_bcast_tx.clone();
+                    let gen_mgr = gen_mgr.clone();
                     move |Json(req): Json<crate::council_verdict::ConsentSubmitRequest>| {
                         let store = store.clone();
                         let ai_bcast = ai_bcast.clone();
+                        let council_bcast = council_bcast.clone();
+                        let gen_mgr = gen_mgr.clone();
                         async move {
                             // load verdict
                             match crate::appeal::load_verdict(&store, &req.session_id, &req.verdict_id) {
@@ -323,10 +323,9 @@ async fn main() -> anyhow::Result<()> {
                                             if let Err(e) = crate::appeal::save_appeal_state(&store, &req.session_id, &new_st) {
                                                 return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, format!("save error: {}", e));
                                             }
+                                            // Persist and broadcast the new appeal state on the council channel
                                             let msg = crate::appeal::ws_msg_state(&req.session_id, &new_st);
-                                            if let Ok(s) = serde_json::to_string(&msg) {
-                                                let _ = ai_bcast.send(s);
-                                            }
+                                            crate::broadcast::broadcast_council(&store, &council_bcast, &req.session_id, "appeal_state", serde_json::to_value(&msg.payload).unwrap_or_else(|_| serde_json::json!({})), Some(&gen_mgr)); 
                                             let resp = serde_json::json!({"ok": true, "state": new_st});
                                             return (axum::http::StatusCode::OK, resp.to_string());
                                         }
@@ -407,6 +406,7 @@ async fn main() -> anyhow::Result<()> {
         .layer(Extension(voice_bcast_tx.clone()));
     let app = app.layer(Extension(ai_bcast_tx.clone()));
     let app = app.layer(Extension(council_bcast_tx.clone()));
+    let app = app.layer(Extension(gen_mgr.clone()));
 
     // Serve static TTS/audio files from `backend/data/audio` at `/audio/{file...}`
     let app = app.route(
@@ -605,7 +605,7 @@ mod search {
         collector::TopDocs,
         doc,
         schema::{Schema, TEXT},
-        Index, IndexReader, IndexWriter, ReloadPolicy,
+        Index, IndexReader, IndexWriter,
     };
 
     pub fn build_schema() -> Schema {

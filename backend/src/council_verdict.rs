@@ -166,3 +166,78 @@ pub struct CouncilWsMsg {
     pub session_id: String,
     pub payload: serde_json::Value,
 }
+
+use std::time::{SystemTime, UNIX_EPOCH};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CouncilMsgType {
+    Verdict,
+    AppealState,
+    SentinelNotice,
+    Interrupt,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InterruptKind {
+    HaltLanguage,
+    LockTools,
+    RequireConsent,
+    HardDeny,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InterruptScope {
+    Session,
+    Action,
+    Tool,
+    Generation,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InterruptRequirements {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exact_phrase: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ttl_seconds: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub constraints: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InterruptPayload {
+    pub kind: InterruptKind,
+    pub scope: InterruptScope,
+    pub reason: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub requirements: Option<InterruptRequirements>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub correlation: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CouncilEnvelope {
+    pub seq: u64,
+    #[serde(rename = "type")]
+    pub msg_type: CouncilMsgType,
+    pub ts_ms: u64,
+    pub sid: String,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vid: Option<String>,
+
+    pub payload: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "type")]
+pub enum CouncilClientMsg {
+    Ack { ack: u64, sid: String },
+    Hello { sid: String, last_ack: Option<u64> },
+}
+
+pub fn now_ms() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64
+}

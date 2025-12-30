@@ -323,4 +323,4 @@ mod __storage_impl {
 
 // Re-export items at crate level when feature is enabled
 #[cfg(feature = "persistence")]
-pub use __storage_impl::{LogEntry, Peak, RocksStore};
+pub use __storage_impl::RocksStore;
