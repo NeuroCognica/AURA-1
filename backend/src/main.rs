@@ -55,6 +55,7 @@ async fn main() -> anyhow::Result<()> {
     // Broadcast channels for PC->client streams (pose, voice)
     let (pose_bcast_tx, _pose_bcast_rx) = tokio::sync::broadcast::channel::<String>(1024);
     let (voice_bcast_tx, _voice_bcast_rx) = tokio::sync::broadcast::channel::<String>(1024);
+    let (ai_bcast_tx, _ai_bcast_rx) = tokio::sync::broadcast::channel::<String>(1024);
 
     // Spawn actors
     tokio::spawn(telemetry_processor_task(pose_tx.subscribe(), telemetry_counter.clone()));
@@ -135,6 +136,7 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
         }))
+        .route("/api/chat", axum::routing::post(crate::ollama::chat_handler))
         .route("/", get(|| async { "AURA-1 backend prototype" }));
 
     #[cfg(feature = "persistence")]
@@ -219,6 +221,7 @@ async fn main() -> anyhow::Result<()> {
         .layer(Extension(telemetry_counter.clone()))
         .layer(Extension(pose_bcast_tx.clone()))
         .layer(Extension(voice_bcast_tx.clone()));
+    let app = app.layer(Extension(ai_bcast_tx.clone()));
 
     // Serve static TTS/audio files from `backend/data/audio` at `/audio/{file...}`
     let app = app.route(
