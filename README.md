@@ -48,17 +48,32 @@ Implementation roadmap (3 sprints)
 3) Retrieval + inference: add Tantivy indexer (text + embeddings), Ollama/Whisper orchestration, RAG fetch path feeding TTS pipeline.
 
 Actionable backlog (initial)
-- Cargo: keep workspace `Cargo.lock` in sync after dependency changes.
-- Backend: implement real telemetry routes with binary audio and JSON pose handling; add `HEADPOSE` + `AUDIO` message types.
-- Persistence: replace stub RocksDB/MMR with disk-backed store + audit log; expose `/integrity/root` endpoint.
-- Search: replace stub Tantivy example with real schema (log_id/timestamp/speaker/content/embedding); add index rebuild command.
-- Frontend: replace stub with Three.js scene + WebSocket client; add Cardboard stereo split + distortion shader.
-- CI: extend workflow to run `cargo test` and `cargo clippy` before publish; add cache for cargo + npm.
 
 Focused code snippets (see `backend/src/main.rs`)
-- Axum WebSocket telemetry handler:
-```rust
-async fn ws_handler(ws: WebSocketUpgrade, ConnectInfo(addr): ConnectInfo<SocketAddr>) -> impl IntoResponse {
+
+Current Status (2025-12-29):
+
+- Pose pipeline validated end-to-end. See `STATUS_REPORT.md` for run instructions and notes.
+- Backend built with `persistence`, `search`, and `tls` features; TLS configured for local testing with mkcert-generated certs.
+
+Quick sensor run commands (developer):
+
+```powershell
+# Activate sensors venv (optional)
+python -m venv aura-sensors
+.\aura-sensors\Scripts\Activate.ps1
+pip install -r sensors/requirements.txt
+
+# Start backend
+cd backend
+cargo run --features "persistence search tls"
+
+# In separate shells from repo root:
+cd sensors; python head_tracker.py
+cd sensors; python pose_sub.py
+```
+
+See `STATUS_REPORT.md` for more details and next steps.
     ws.on_upgrade(move |socket| handle_ws(socket, addr))
 }
 ```

@@ -365,6 +365,29 @@ Only after this "green lock" is achieved will the DeviceOrientation API and navi
 
 ## ---
 
+**Progress Update (2025-12-29)**
+
+The repository now contains a validated end-to-end pose pipeline and updated sensor tooling. Key outcomes since the architecture draft above:
+
+- `sensors/head_tracker.py`: Rewritten to use MediaPipe Tasks (`FaceLandmarker`) and requires `sensors/models/face_landmarker.task` (downloaded). Streams JSON pose frames to the backend ingest WebSocket at `wss://127.0.0.1:8443/ws/pose-ingest`.
+- `sensors/pose_sub.py`: Subscriber hardened to avoid WebSocket ping/pong keepalive race errors (disabled automatic pings, graceful close handling). It receives broadcast pose frames from `wss://127.0.0.1:8443/ws/pose`.
+- Backend: built with `persistence`, `search`, and `tls` features; Axum/Tokio server listens on TLS port (8443) with mkcert-generated certs for local HTTPS testing. Telemetry and pose broadcast endpoints are wired and tested.
+- Model asset: `sensors/models/face_landmarker.task` downloaded into the project and used by the head tracker.
+
+Observed runtime validation:
+
+- Live JSON pose frames were observed end-to-end: webcam → FaceLandmarker → `head_tracker.py` → `/ws/pose-ingest` → backend broadcast → `/ws/pose` → `pose_sub.py`.
+- Previously observed errors (MediaPipe namespace mismatches and a script SyntaxError) were resolved by migrating to the Tasks API and rewriting the head tracker script.
+- A keepalive ping-timeout (1011) on the subscriber was mitigated by disabling automatic pings and catching `ConnectionClosed` to exit cleanly.
+
+Next recommended actions:
+
+- Replace the placeholder center-of-face yaw/pitch math in `sensors/head_tracker.py` with a proper `solvePnP`-based pose estimation using canonical face landmarks (high priority).
+- Optionally tune the sender `websockets.connect` ping intervals on `head_tracker.py` if ping-timeout issues reappear under sustained network load.
+- Add a small operator visual (ASCII or minimal web debug page) to confirm recenter and yaw/pitch values during testing.
+
+For run steps and short sensor instructions, see `STATUS_REPORT.md` and the README updates in this commit.
+
 **9\. Deployment and Lifecycle**
 
 ### **9.1 Static Compilation**
