@@ -5,8 +5,10 @@ use futures::{Stream, StreamExt};
 use std::pin::Pin;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use chrono;
 use std::sync::Arc;
 use crate::storage::RocksStore;
+use crate::sentinel::{sentinel_evaluate, sentinel_speak, format_sentinel_block, SentinelDecision};
 use tokio::sync::broadcast;
 use tracing::{debug, info, warn};
 
@@ -18,12 +20,24 @@ pub struct ChatMsg {
 }
 
 #[derive(Serialize)]
-struct OllamaChatReq {
+struct OllamaGenerateReq {
     model: String,
-    messages: Vec<OllamaMsg>,
+    prompt: String,
     stream: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
-    keep_alive: Option<String>,
+    options: Option<OllamaGenerateOptions>,
+}
+
+#[derive(Serialize)]
+struct OllamaGenerateOptions {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    num_ctx: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    temperature: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    top_p: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    num_gpu: Option<u32>,
 }
 
 #[derive(Serialize)]
@@ -33,16 +47,25 @@ struct OllamaMsg {
 }
 
 #[derive(Deserialize)]
-struct OllamaChatStreamChunk {
+pub struct ChatRequest {
+    pub session_id: String,
+    pub text: String,
     #[serde(default)]
-    message: Option<OllamaAssistantMsg>,
+    pub ollama_url: Option<String>,
     #[serde(default)]
-    done: bool,
+    pub model: Option<String>,
+    #[serde(default)]
+    pub system: Option<String>,
+    #[serde(default)]
+    pub retrieval: Option<String>,
 }
 
 #[derive(Deserialize)]
-struct OllamaAssistantMsg {
-    content: String,
+struct OllamaChatStreamChunk {
+    #[serde(default)]
+    response: Option<String>,
+    #[serde(default)]
+    done: bool,
 }
 
 pub type BoxedTextStream = Pin<Box<dyn Stream<Item = anyhow::Result<String>> + Send>>;
@@ -54,37 +77,39 @@ async fn stream_ollama_chat(
     retrieval_block: Option<String>,
     history: &[ChatMsg],
 ) -> anyhow::Result<BoxedTextStream> {
-    let mut messages: Vec<OllamaMsg> = Vec::new();
-
-    messages.push(OllamaMsg {
-        role: "system".into(),
-        content: system.into(),
-    });
-
-    if let Some(rag) = retrieval_block {
-        messages.push(OllamaMsg {
-            role: "system".into(),
-            content: format!("Relevant memory:\n{}", rag),
-        });
+    // Build a flattened prompt string from history for /api/generate
+    fn build_prompt(history: &[ChatMsg], system: &str, retrieval: Option<String>) -> String {
+        let mut prompt = String::new();
+        if !system.is_empty() {
+            prompt.push_str(&format!("System: {}\n", system));
+        }
+        if let Some(r) = retrieval {
+            prompt.push_str(&format!("Relevant memory:\n{}\n", r));
+        }
+        for m in history {
+            match m.role.as_str() {
+                "system" => prompt.push_str(&format!("System: {}\n", m.content)),
+                "user" => prompt.push_str(&format!("User: {}\n", m.content)),
+                "assistant" => prompt.push_str(&format!("Assistant: {}\n", m.content)),
+                _ => prompt.push_str(&format!("{}: {}\n", m.role, m.content)),
+            }
+        }
+        prompt.push_str("Assistant: ");
+        prompt
     }
 
-    for m in history {
-        messages.push(OllamaMsg {
-            role: m.role.clone(),
-            content: m.content.clone(),
-        });
-    }
+    let prompt = build_prompt(history, system, retrieval_block);
 
-    let req = OllamaChatReq {
+    let req = OllamaGenerateReq {
         model: model.into(),
-        messages,
+        prompt,
         stream: true,
-        keep_alive: Some("30m".into()),
+        options: Some(OllamaGenerateOptions { num_ctx: Some(2048), temperature: Some(0.2), top_p: Some(0.95), num_gpu: Some(1) }),
     };
 
     let client = Client::new();
     let res = client
-        .post(format!("{}/api/chat", ollama_url.trim_end_matches('/')))
+        .post(format!("{}/api/generate", ollama_url.trim_end_matches('/')))
         .json(&req)
         .send()
         .await?
@@ -93,6 +118,7 @@ async fn stream_ollama_chat(
     let byte_stream = res.bytes_stream();
 
     // parse ndjson stream into a Stream of String deltas
+    // parse ndjson stream into a Stream of String deltas (expects {"response":"...","done":bool})
     let s = futures::stream::try_unfold(
         (byte_stream, bytes::BytesMut::new()),
         |(mut bs, mut buf)| async move {
@@ -109,9 +135,9 @@ async fn stream_ollama_chat(
                         continue;
                     }
                     let parsed: OllamaChatStreamChunk = serde_json::from_slice(line)?;
-                    if let Some(msg) = parsed.message {
-                        if !msg.content.is_empty() {
-                            return Ok(Some((msg.content, (bs, buf))));
+                    if let Some(resp) = parsed.response {
+                        if !resp.is_empty() {
+                            return Ok(Some((resp, (bs, buf))));
                         }
                     }
                     if parsed.done {
@@ -130,113 +156,108 @@ async fn stream_ollama_chat(
 #[cfg(feature = "persistence")]
 #[axum::debug_handler]
 pub async fn chat_handler(
-    Extension(ai_bcast): Extension<broadcast::Sender<String>>,
     Extension(store): Extension<Arc<RocksStore>>,
-    Json(payload): Json<serde_json::Value>,
+    Extension(ai_bcast): Extension<broadcast::Sender<String>>,
+    Json(req): Json<ChatRequest>,
 ) -> impl axum::response::IntoResponse {
-    // Require `session_id` and `text` fields
-    let session_id = match payload.get("session_id").and_then(|v| v.as_str()) {
-        Some(s) => s.to_string(),
-        None => {
-            return (StatusCode::BAD_REQUEST, "missing session_id");
-        }
-    };
+    let ts = chrono::Utc::now().timestamp_millis();
 
-    let text = match payload.get("text").and_then(|v| v.as_str()) {
-        Some(t) => t.to_string(),
-        None => {
-            return (StatusCode::BAD_REQUEST, "missing text");
-        }
-    };
-
-    let ollama_url = payload
-        .get("ollama_url")
-        .and_then(|v| v.as_str())
-        .unwrap_or("http://127.0.0.1:11434")
-        .to_string();
-    let model = payload
-        .get("model")
-        .and_then(|v| v.as_str())
-        .unwrap_or("llama2")
-        .to_string();
-    let system = payload
-        .get("system")
-        .and_then(|v| v.as_str())
-        .unwrap_or("AURA persona")
-        .to_string();
-
-    let retrieval = payload.get("retrieval").and_then(|v| v.as_str()).map(|s| s.to_string());
-
-    // Append user message to session (append-only)
-    if let Err(e) = store.append_chat_msg(&session_id, "user", &text) {
-        warn!(%e, "failed to append user message to RocksDB");
+    // 1. persist user message
+    if let Err(e) = store.append_chat_msg(&req.session_id, "user", &req.text) {
+        warn!(%e, "failed to append user message");
+        return (StatusCode::INTERNAL_SERVER_ERROR, format!("append error: {}", e));
     }
 
-    // Load recent history for context (last 20 messages)
-    let recent = match store.load_recent_chat(&session_id, 20) {
+    // 2. load recent context
+    let recent = match store.load_recent_chat(&req.session_id, 20) {
         Ok(v) => v,
         Err(e) => {
-            warn!(%e, "failed to load recent chat from RocksDB");
+            warn!(%e, "failed to load recent chat");
             Vec::new()
         }
     };
 
-    // Map storage entries to ChatMsg for the Ollama request
     let mut history: Vec<ChatMsg> = recent
         .iter()
         .map(|le| ChatMsg { role: le.speaker.clone(), content: le.content.clone(), ts: le.timestamp_ms })
         .collect();
 
-    // Also include any explicit `history` field if provided (appended after persisted history)
-    if let Some(arr) = payload.get("history").and_then(|v| v.as_array()) {
-        for it in arr {
-            if let (Some(role), Some(content)) = (it.get("role").and_then(|r| r.as_str()), it.get("content").and_then(|c| c.as_str())) {
-                history.push(ChatMsg { role: role.to_string(), content: content.to_string(), ts: it.get("ts").and_then(|t| t.as_i64()).unwrap_or(0) });
+    // 3. start Ollama stream
+    // Prepare Ollama call parameters (used by sentinel speak if needed)
+    let ollama_url = req.ollama_url.as_deref().unwrap_or("http://127.0.0.1:11434");
+    let model = req.model.as_deref().unwrap_or("deepseek-coder:6.7b");
+    let system = req.system.as_deref().unwrap_or("AURA persona");
+    let retrieval = req.retrieval.clone();
+
+    // Run Sentinel evaluator synchronously (pure heuristics) to decide whether Sentinel must speak.
+    match sentinel_evaluate(&req.text) {
+        SentinelDecision::Allow => {
+            // continue as normal
+        }
+        SentinelDecision::AllowWithWarning(reason) => {
+            // produce a short sentinel block, persist and broadcast, then continue
+            let block = format_sentinel_block(&reason, "ALLOW_WITH_WARNING");
+            if let Err(e) = store.append_chat_msg(&req.session_id, "sentinel", &block) {
+                warn!(%e, "failed to persist sentinel warning");
+            }
+            let _ = ai_bcast.send(block.clone());
+            // continue to main generation
+        }
+        SentinelDecision::RequireConsent(reason) => {
+            // create sentinel speech and return it to the caller, do not proceed with generation
+            let system = "You are the Sentinel archetype. Short, exact, non-soothing. Identify risks and demand explicit user confirmation before proceeding.";
+            match sentinel_speak(ollama_url, model, system).await {
+                Ok(resp) => {
+                    let block = resp;
+                    let _ = store.append_chat_msg(&req.session_id, "sentinel", &block);
+                    let _ = ai_bcast.send(block.clone());
+                    return (StatusCode::OK, block);
+                }
+                Err(e) => {
+                    warn!(%e, "sentinel speak failed");
+                    let block = format_sentinel_block(&reason, "REQUIRE_CONSENT");
+                    let _ = store.append_chat_msg(&req.session_id, "sentinel", &block);
+                    let _ = ai_bcast.send(block.clone());
+                    return (StatusCode::OK, block);
+                }
+            }
+        }
+        SentinelDecision::Deny(reason) => {
+            let block = format_sentinel_block(&reason, "DENY");
+            let _ = store.append_chat_msg(&req.session_id, "sentinel", &block);
+            let _ = ai_bcast.send(block.clone());
+            return (StatusCode::FORBIDDEN, block);
+        }
+    }
+
+    let mut stream = match stream_ollama_chat(ollama_url, model, system, retrieval, &history).await {
+        Ok(s) => s,
+        Err(e) => {
+            warn!(%e, "failed to start ollama stream");
+            return (StatusCode::INTERNAL_SERVER_ERROR, format!("stream error: {}", e));
+        }
+    };
+
+    // 4. stream deltas, broadcast, accumulate
+    let mut assistant_buf = String::new();
+    while let Some(delta_res) = stream.next().await {
+        match delta_res {
+            Ok(token) => {
+                assistant_buf.push_str(&token);
+                let _ = ai_bcast.send(token);
+            }
+            Err(e) => {
+                warn!(%e, "error reading stream chunk");
+                return (StatusCode::INTERNAL_SERVER_ERROR, format!("stream chunk error: {}", e));
             }
         }
     }
 
-    // Spawn background task: stream Ollama deltas, broadcast, accumulate, then persist assistant message.
-    let bcast = ai_bcast.clone();
-    let session_clone = session_id.clone();
-    let store_clone = store.clone();
-    let retrieval_clone = retrieval.clone();
-    let system_clone = system.clone();
-    let model_clone = model.clone();
-    let ollama_url_clone = ollama_url.clone();
+    // 5. persist assistant message
+    if let Err(e) = store.append_chat_msg(&req.session_id, "assistant", &assistant_buf) {
+        warn!(%e, "failed to append assistant message");
+        return (StatusCode::INTERNAL_SERVER_ERROR, format!("append error: {}", e));
+    }
 
-    tokio::spawn(async move {
-        let mut assistant_accum = String::new();
-        match stream_ollama_chat(&ollama_url_clone, &model_clone, &system_clone, retrieval_clone, &history).await {
-            Ok(mut s) => {
-                while let Some(chunk) = s.next().await {
-                    match chunk {
-                        Ok(text) => {
-                            // Broadcast delta to clients
-                            if let Err(e) = bcast.send(text.clone()) {
-                                warn!(%e, "broadcast send failed");
-                            }
-                            assistant_accum.push_str(&text);
-                        }
-                        Err(e) => {
-                            warn!(%e, "ollama stream chunk parse error");
-                            break;
-                        }
-                    }
-                }
-
-                info!("ollama stream completed; persisting assistant message");
-                if !assistant_accum.is_empty() {
-                    if let Err(e) = store_clone.append_chat_msg(&session_clone, "assistant", &assistant_accum) {
-                        warn!(%e, "failed to append assistant message to RocksDB");
-                    }
-                }
-            }
-            Err(e) => {
-                warn!(%e, "failed to start ollama stream");
-            }
-        }
-    });
-
-    (StatusCode::ACCEPTED, "streaming")
+    (StatusCode::OK, String::new())
 }

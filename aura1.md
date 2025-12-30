@@ -386,6 +386,17 @@ Next recommended actions:
 - Optionally tune the sender `websockets.connect` ping intervals on `head_tracker.py` if ping-timeout issues reappear under sustained network load.
 - Add a small operator visual (ASCII or minimal web debug page) to confirm recenter and yaw/pitch values during testing.
 
+## **Sentinel: Constitutional Authority**
+
+The codebase includes a first-class `Sentinel` component that acts as an on-path governance and safety steward for AI-assisted actions. The `Sentinel` enforces a deterministic pre-check over user requests and may emit one of four canonical verdicts: `Allow`, `AllowWithWarning`, `RequireConsent`, or `Deny`.
+
+Key behavior:
+- Deterministic first: a pure Rust heuristic (`sentinel_evaluate`) runs synchronously before any LLM call.
+- Generative second: only when `Sentinel` must "speak" do we perform a constrained, non-streaming LLM call to produce a formatted message.
+- Auditable: every Sentinel intervention is appended to the RocksDB append-only log and broadcast to connected clients.
+
+Operational note: The `Sentinel` is wired into the `/api/chat` flow; appeals may be submitted to `/api/appeal` which records the request as an append-only event for later council review.
+
 For run steps and short sensor instructions, see `STATUS_REPORT.md` and the README updates in this commit.
 
 **9\. Deployment and Lifecycle**

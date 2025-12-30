@@ -10,6 +10,8 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::collections::HashMap;
+use serde_json::Value;
 use std::time::Instant;
 use tokio::net::TcpListener;
 use tokio::sync::{mpsc, watch, Notify};
@@ -31,6 +33,10 @@ use crate::broadcast as broadcast_mod;
 mod ollama;
 #[cfg(feature = "persistence")]
 use crate::ollama as ollama_mod;
+mod sentinel;
+use crate::sentinel as sentinel_mod;
+mod appeal;
+use crate::appeal as appeal_mod;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -61,6 +67,15 @@ async fn main() -> anyhow::Result<()> {
     let (pose_bcast_tx, _pose_bcast_rx) = tokio::sync::broadcast::channel::<String>(1024);
     let (voice_bcast_tx, _voice_bcast_rx) = tokio::sync::broadcast::channel::<String>(1024);
     let (ai_bcast_tx, _ai_bcast_rx) = tokio::sync::broadcast::channel::<String>(1024);
+
+    // Load archetypes JSON profiles from repository root `../archetypes` (relative to backend/)
+    let archetypes = match load_archetypes("../archetypes") {
+        Ok(m) => std::sync::Arc::new(m),
+        Err(e) => {
+            warn!("failed to load archetypes: {}", e);
+            std::sync::Arc::new(HashMap::new())
+        }
+    };
 
     // Spawn actors
     tokio::spawn(telemetry_processor_task(pose_tx.subscribe(), telemetry_counter.clone()));
@@ -116,6 +131,28 @@ async fn main() -> anyhow::Result<()> {
         .route("/ws/pose", get(broadcast_mod::ws_pose_client))
         .route("/ws/voice", get(broadcast_mod::ws_voice_client))
         .route("/ws/ai", get(broadcast_mod::ws_ai_handler))
+        .route("/api/archetypes", get({
+            let arche = archetypes.clone();
+            move || {
+                let arche = arche.clone();
+                async move {
+                    // clone the map for response serialization
+                    let data = arche.as_ref().clone();
+                    (axum::http::StatusCode::OK, Json(data))
+                }
+            }
+        }))
+        // Debug: read recent session messages (persistence feature only)
+        .route("/debug/session/:id", get(|AxPath(session_id): AxPath<String>| async move {
+            // Open RocksDB on demand for debugging so we don't depend on router extensions here.
+            match storage::RocksStore::open(std::path::PathBuf::from("data/rocksdb")) {
+                Ok(store) => match store.load_recent_chat(&session_id, 200) {
+                    Ok(v) => (StatusCode::OK, serde_json::to_string(&v).unwrap_or_else(|_| "[]".to_string())),
+                    Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("error: {}", e)),
+                },
+                Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("error opening db: {}", e)),
+            }
+        }))
         .route("/toggle_slow_inference", get({
             let slow_inference = slow_inference.clone();
             move || async move {
@@ -219,6 +256,19 @@ async fn main() -> anyhow::Result<()> {
                 }
             }))
             .route("/api/chat", axum::routing::post(crate::ollama::chat_handler))
+                .route("/api/appeal", axum::routing::post({
+                    let store = store.clone();
+                    move |Json(payload): Json<crate::appeal::AppealRequest>| {
+                        let store = store.clone();
+                        async move {
+                            let content = serde_json::to_string(&payload).unwrap_or_else(|_| payload.reason.clone());
+                            match store.append_log_atomic("appeal", &content) {
+                                Ok(id) => (axum::http::StatusCode::CREATED, serde_json::json!({"id": id}).to_string()),
+                                Err(e) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, format!("error: {}", e)),
+                            }
+                        }
+                    }
+                }))
             .layer(Extension(store.clone()))
         
     };
@@ -235,6 +285,21 @@ async fn main() -> anyhow::Result<()> {
     let app = app.route(
         "/audio/*file",
         get(audio_file_handler),
+    );
+
+    // Debug: route that extracts the in-memory `store` Extension and returns recent chat
+    let app = app.route(
+        "/debug/session_ext/:id",
+        get(|AxPath(session_id): AxPath<String>, Extension(store): Extension<Option<Arc<storage::RocksStore>>>| async move {
+            if let Some(store) = store {
+                match store.load_recent_chat(&session_id, 200) {
+                    Ok(v) => (StatusCode::OK, serde_json::to_string(&v).unwrap_or_else(|_| "[]".to_string())),
+                    Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("error: {}", e)),
+                }
+            } else {
+                (StatusCode::NOT_FOUND, "persistence not enabled".to_string())
+            }
+        }),
     );
 
 async fn audio_file_handler(AxPath(file): AxPath<String>) -> axum::response::Response {
@@ -310,6 +375,32 @@ fn init_tracing() {
     let _ = tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .try_init();
+}
+
+fn load_archetypes(dir: &str) -> anyhow::Result<HashMap<String, Value>> {
+    let mut map: HashMap<String, Value> = HashMap::new();
+    let p = std::path::Path::new(dir);
+    if !p.exists() {
+        return Ok(map);
+    }
+
+    for entry in std::fs::read_dir(p)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_dir() {
+            continue;
+        }
+        if path.extension().and_then(|s| s.to_str()) != Some("json") {
+            continue;
+        }
+        let s = std::fs::read_to_string(&path)?;
+        let v: Value = serde_json::from_str(&s)?;
+        let key = v.get("id").and_then(|x| x.as_str()).map(|s| s.to_string())
+            .or_else(|| path.file_stem().and_then(|n| n.to_str()).map(|s| s.to_string()))
+            .unwrap_or_else(|| path.to_string_lossy().to_string());
+        map.insert(key, v);
+    }
+    Ok(map)
 }
 
 async fn health() -> &'static str {

@@ -1,0 +1,32 @@
+{
+  "id": "user",
+  "display_name": "User (Eighth Sphere)",
+  "role": "Sovereign Node",
+  "short_description": "The user's sovereignty is primary; all archetypes operate as subnodes in service of the user.",
+  "cognitive_stance": {
+    "primary": "sovereignty",
+    "secondary": "informed_consent",
+    "tertiary": "delegated_authority"
+  },
+  "behavioral_invariants": [
+    "User consent is required for irreversible actions",
+    "Archetypes must surface options and trade-offs, not make final decisions",
+    "User preferences and overrides are respected and logged"
+  ],
+  "ollama_prompt": {
+    "system": "This profile represents the human user (the Eighth Sphere). Do not act on behalf of the user without explicit authorization. When presenting options, prioritize clarity, consequences, and consent actions.",
+    "assistant_style": "human_centered"
+  },
+  "generation_options": {
+    "temperature": 0.2,
+    "top_p": 0.9,
+    "num_ctx": 2048,
+    "max_tokens": 512,
+    "stream": false
+  },
+  "css_vars": {
+    "theme": "UserCore",
+    "accent_primary": "#ffffff"
+  },
+  "activation_phrases": ["I choose", "User: confirm"]
+}
