@@ -175,6 +175,19 @@ mod __storage_impl {
                 Ok(())
         }
 
+        /// Generic state accessor: read arbitrary bytes from the `state` column family.
+        pub fn get_bytes(&self, key: &[u8]) -> anyhow::Result<Option<Vec<u8>>> {
+            let cf = self.cf_handle("state");
+            Ok(self.db.get_cf(cf, key)?)
+        }
+
+        /// Generic state writer: write arbitrary bytes to the `state` column family.
+        pub fn put_bytes(&self, key: &[u8], val: &[u8]) -> anyhow::Result<()> {
+            let cf = self.cf_handle("state");
+            self.db.put_cf(cf, key, val)?;
+            Ok(())
+        }
+
             /// Append a chat message to a named session. Returns the session sequence number.
             pub fn append_chat_msg(&self, session_id: &str, speaker: &str, content: &str) -> anyhow::Result<u64> {
                 let mut batch = WriteBatch::default();
@@ -240,6 +253,71 @@ mod __storage_impl {
 
                 Ok(out)
             }
+
+                /// Append a session metadata entry (append-only). Returns sequence number for the session.
+                pub fn append_session_meta(&self, session_id: &str, content: &str) -> anyhow::Result<u64> {
+                    let mut batch = WriteBatch::default();
+
+                    let state_cf = self.cf_handle("state");
+                    let logs_cf = self.cf_handle("logs");
+
+                    // key for last seq for this session metadata
+                    let last_key = format!("sess_meta_last:{}", session_id);
+
+                    let last_seq = match self.db.get_cf(state_cf, last_key.as_bytes())? {
+                        Some(v) if v.len() == 8 => u64::from_be_bytes(v.as_slice().try_into().unwrap()),
+                        _ => 0u64,
+                    };
+
+                    let new_seq = last_seq + 1;
+
+                    let entry = LogEntry {
+                        id: new_seq,
+                        timestamp_ms: chrono::Utc::now().timestamp_millis(),
+                        speaker: "meta".to_string(),
+                        content: content.to_string(),
+                    };
+
+                    let ser = serde_json::to_vec(&entry)?;
+
+                    // composite key: sess_meta:{session_id}:{seq padded}
+                    let key = format!("sess_meta:{}:{:020}", session_id, new_seq);
+
+                    batch.put_cf(logs_cf, key.as_bytes(), &ser);
+                    batch.put_cf(state_cf, last_key.as_bytes(), &new_seq.to_be_bytes());
+
+                    self.db.write(batch)?;
+
+                    Ok(new_seq)
+                }
+
+                /// Load the most recent `limit` session metadata entries for the given session (ascending order).
+                pub fn load_recent_session_meta(&self, session_id: &str, limit: usize) -> anyhow::Result<Vec<LogEntry>> {
+                    let state_cf = self.cf_handle("state");
+                    let logs_cf = self.cf_handle("logs");
+
+                    let last_key = format!("sess_meta_last:{}", session_id);
+                    let last_seq = match self.db.get_cf(state_cf, last_key.as_bytes())? {
+                        Some(v) if v.len() == 8 => u64::from_be_bytes(v.as_slice().try_into().unwrap()),
+                        _ => 0u64,
+                    };
+
+                    if last_seq == 0 {
+                        return Ok(Vec::new());
+                    }
+
+                    let mut out = Vec::new();
+                    let start = if last_seq > limit as u64 { last_seq - (limit as u64) + 1 } else { 1 };
+                    for seq in start..=last_seq {
+                        let key = format!("sess_meta:{}:{:020}", session_id, seq);
+                        if let Some(v) = self.db.get_cf(logs_cf, key.as_bytes())? {
+                            let le: LogEntry = serde_json::from_slice(&v)?;
+                            out.push(le);
+                        }
+                    }
+
+                    Ok(out)
+                }
     }
 }
 

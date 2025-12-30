@@ -7,7 +7,7 @@ Primary stacks
 - Backend (authority): Rust, Axum/Tokio, optional RocksDB/MMR/Tantivy (gated by features).
 - Frontend (client-only): TypeScript/JavaScript, Three.js target (stubbed build).
 
-Workspace layout
+- Workspace layout
 - `/backend/` — Rust crate (`aura-backend`) with Axum server + optional persistence/search modules.
 - `/frontend/` — Stub web client; `npm run build` copies `public/index.html` into `frontend/build`.
 - `/scripts/` — Ops helpers (`deploy_web.sh` for subtree pushes).
@@ -18,6 +18,21 @@ Backend quickstart
 cargo build --release           # build backend only
 cargo run                       # dev run on :8080
 curl -v http://localhost:8080/health   # smoke check
+```
+
+Important: to enable persistence/search/tls features use the feature flags shown below. On some platforms native build tooling (cmake, a C/C++ compiler) is required for RocksDB/whisper native crates.
+
+Features & Run examples
+- Enable persistence + search + TLS (local dev with mkcert):
+
+```bash
+cargo run --features "persistence search tls"
+```
+
+- Run tests with persistence/search enabled:
+
+```bash
+cargo test --features "persistence search tls" -- --nocapture
 ```
 
 Backend features (opt-in)
@@ -76,6 +91,39 @@ cd sensors; python pose_sub.py
 See `STATUS_REPORT.md` for more details and next steps.
     ws.on_upgrade(move |socket| handle_ws(socket, addr))
 }
+
+Key HTTP & WebSocket endpoints
+- Health: `GET /health`
+- Metrics: `GET /metrics`
+- Archetypes: `GET /api/archetypes` — returns loaded archetype JSON profiles.
+- Chat (AI): `POST /api/chat` — main chat ingress (persistence feature required).
+- Appeal: `POST /api/appeal` — record an appeal against an AI/Sentinel decision (persistence required).
+- Debug session (persistence only): `GET /debug/session/:id` and `GET /debug/session_ext/:id`.
+- WebSocket ingest endpoints: `GET /ws/pose-ingest`, `GET /ws/voice-ingest`.
+- WebSocket client subscriptions: `GET /ws/pose`, `GET /ws/voice`, `GET /ws/ai`.
+
+Sentinel & Governance
+- The codebase contains a first-class `Sentinel` component (see `backend/src/sentinel.rs`). Behavioral notes:
+    - Deterministic pre-check (`sentinel_evaluate`) runs in Rust before making any LLM calls.
+    - `Sentinel` may `Allow`, `AllowWithWarning`, `RequireConsent`, or `Deny` an action.
+    - If `RequireConsent` or a speech intervention is needed, a constrained non-streaming Ollama call is used to produce the message.
+    - All Sentinel interventions are appended to the RocksDB append-only log and broadcast to clients.
+
+Appeals
+- Appeals are recorded to the append-only log via `POST /api/appeal` (body: `session_id`, optional `user_id`, `reason`, optional `payload`). Appeals are intended for later council/case review and audit.
+
+Troubleshooting & common issues
+- Release build can fail if system-level build tools are missing (e.g., `cmake`, `clang`/`gcc`) required by native crates. Install build tools or use a dev container with the required toolchain.
+- If TLS fails to start, verify `certs/cert.pem` and `certs/key.pem` or use the mkcert workflow described in `aura1.md`.
+
+Contribution & coding guidelines
+- The Rust backend is authoritative: keep business logic, persistence, and AI orchestration in `backend/`.
+- Frontend is client-only; do not move server-side logic to the frontend.
+- When changing persistence layout or MMR behavior, include migration notes and tests.
+
+Where to go next
+- See `aura1.md` for the architecture report and `STATUS_REPORT.md` for operational run instructions and sensor wiring.
+
 ```
 - RocksDB + MMR scaffold (feature `persistence`):
 ```rust

@@ -35,6 +35,8 @@ mod ollama;
 use crate::ollama as ollama_mod;
 mod sentinel;
 use crate::sentinel as sentinel_mod;
+mod council_verdict;
+use crate::council_verdict as council_verdict_mod;
 mod appeal;
 use crate::appeal as appeal_mod;
 
@@ -67,6 +69,7 @@ async fn main() -> anyhow::Result<()> {
     let (pose_bcast_tx, _pose_bcast_rx) = tokio::sync::broadcast::channel::<String>(1024);
     let (voice_bcast_tx, _voice_bcast_rx) = tokio::sync::broadcast::channel::<String>(1024);
     let (ai_bcast_tx, _ai_bcast_rx) = tokio::sync::broadcast::channel::<String>(1024);
+    let (council_bcast_tx, _council_bcast_rx) = tokio::sync::broadcast::channel::<String>(256);
 
     // Load archetypes JSON profiles from repository root `../archetypes` (relative to backend/)
     let archetypes = match load_archetypes("../archetypes") {
@@ -91,6 +94,33 @@ async fn main() -> anyhow::Result<()> {
         let s = storage::RocksStore::open(path)?;
         Some(std::sync::Arc::new(s))
     };
+
+    // Startup check: verify configured Ollama model is reachable. Non-fatal: warn only.
+    {
+        let ollama_url = std::env::var("OLLAMA_URL").unwrap_or_else(|_| "http://127.0.0.1:11434".to_string());
+        let model = std::env::var("OLLAMA_DEFAULT_MODEL").unwrap_or_else(|_| "deepseek-coder:6.7b".to_string());
+        let url = ollama_url.clone();
+        let model_name = model.clone();
+        tokio::spawn(async move {
+            let client = reqwest::Client::new();
+            let list_url = format!("{}/api/models", url.trim_end_matches('/'));
+            match client.get(&list_url).send().await {
+                Ok(r) => match r.json::<serde_json::Value>().await {
+                    Ok(json) => {
+                        // Expect an array or object; do a simple substring search for model name
+                        let s = json.to_string();
+                        if !s.contains(&model_name) {
+                            warn!("configured ollama model not found: {} (models response: {})", model_name, s);
+                        } else {
+                            info!("ollama model present: {}", model_name);
+                        }
+                    }
+                    Err(e) => warn!(%e, "failed to parse /api/models response from Ollama"),
+                },
+                Err(e) => warn!(%e, "failed to reach Ollama at {}", url),
+            }
+        });
+    }
 
     // Optional synthetic telemetry generator (env var: SYNTHETIC_TELEMETRY=1)
     if std::env::var("SYNTHETIC_TELEMETRY").as_deref() == Ok("1") {
@@ -131,6 +161,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/ws/pose", get(broadcast_mod::ws_pose_client))
         .route("/ws/voice", get(broadcast_mod::ws_voice_client))
         .route("/ws/ai", get(broadcast_mod::ws_ai_handler))
+        .route("/ws/council", get(broadcast_mod::ws_council_handler))
         .route("/api/archetypes", get({
             let arche = archetypes.clone();
             move || {
@@ -269,6 +300,101 @@ async fn main() -> anyhow::Result<()> {
                         }
                     }
                 }))
+                .route("/api/appeal/consent", axum::routing::post({
+                    let store = store.clone();
+                    let ai_bcast = ai_bcast_tx.clone();
+                    move |Json(req): Json<crate::council_verdict::ConsentSubmitRequest>| {
+                        let store = store.clone();
+                        let ai_bcast = ai_bcast.clone();
+                        async move {
+                            // load verdict
+                            match crate::appeal::load_verdict(&store, &req.session_id, &req.verdict_id) {
+                                Ok(v) => {
+                                    // load current state
+                                    let st = match crate::appeal::load_appeal_state(&store, &req.session_id) {
+                                        Ok(s) => s,
+                                        Err(e) => return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, format!("error: {}", e)),
+                                    };
+
+                                    let now_ms = chrono::Utc::now().timestamp_millis() as u128;
+                                    match crate::appeal::submit_consent(&st, &v, &req.phrase, now_ms) {
+                                        Ok(new_st) => {
+                                            // persist and broadcast state
+                                            if let Err(e) = crate::appeal::save_appeal_state(&store, &req.session_id, &new_st) {
+                                                return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, format!("save error: {}", e));
+                                            }
+                                            let msg = crate::appeal::ws_msg_state(&req.session_id, &new_st);
+                                            if let Ok(s) = serde_json::to_string(&msg) {
+                                                let _ = ai_bcast.send(s);
+                                            }
+                                            let resp = serde_json::json!({"ok": true, "state": new_st});
+                                            return (axum::http::StatusCode::OK, resp.to_string());
+                                        }
+                                        Err(e) => {
+                                            return (axum::http::StatusCode::BAD_REQUEST, format!("error: {}", e));
+                                        }
+                                    }
+                                }
+                                Err(e) => return (axum::http::StatusCode::NOT_FOUND, format!("verdict load error: {}", e)),
+                            }
+                        }
+                    }
+                }))
+                .route("/api/appeal/alchemist", axum::routing::post({
+                    let store = store.clone();
+                    move |Json(req): Json<crate::council_verdict::AlchemistInvokeRequest>| {
+                        let store = store.clone();
+                        async move {
+                            // stub: record attempt and return not implemented
+                            let body = serde_json::to_string(&req).unwrap_or_default();
+                            let _ = store.append_chat_msg(&req.session_id, "appeal_alchemist", &body);
+                            (axum::http::StatusCode::NOT_IMPLEMENTED, serde_json::json!({"ok": false, "reason": "alchemist not implemented"}).to_string())
+                        }
+                    }
+                }))
+                // Session mode API: GET latest session meta and POST mode changes (append-only + audit log)
+                .route("/api/session/:id/mode", axum::routing::get({
+                    let store = store.clone();
+                    move |AxPath(session_id): AxPath<String>| {
+                        let store = store.clone();
+                        async move {
+                            match store.load_recent_session_meta(&session_id, 1) {
+                                Ok(mut v) => {
+                                    if v.is_empty() {
+                                        (axum::http::StatusCode::OK, "{}".to_string())
+                                    } else {
+                                        let last = v.pop().unwrap();
+                                        (axum::http::StatusCode::OK, serde_json::to_string(&last).unwrap_or_else(|_| "{}".to_string()))
+                                    }
+                                }
+                                Err(e) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, format!("error: {}", e)),
+                            }
+                        }
+                    }
+                }))
+                .route("/api/session/:id/mode", axum::routing::post({
+                    let store = store.clone();
+                    move |AxPath(session_id): AxPath<String>, Json(payload): Json<serde_json::Value>| {
+                        let store = store.clone();
+                        async move {
+                            // accept arbitrary JSON metadata; write append-only and also append an audit chat message
+                            let content = match serde_json::to_string(&payload) {
+                                Ok(s) => s,
+                                Err(e) => return (axum::http::StatusCode::BAD_REQUEST, format!("json error: {}", e)),
+                            };
+
+                            match store.append_session_meta(&session_id, &content) {
+                                Ok(_) => {
+                                    // also append an audit entry to the session chat
+                                    let audit_msg = format!("mode_change: {}", content);
+                                    let _ = store.append_chat_msg(&session_id, "system", &audit_msg);
+                                    (axum::http::StatusCode::CREATED, "{}".to_string())
+                                }
+                                Err(e) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, format!("error: {}", e)),
+                            }
+                        }
+                    }
+                }))
             .layer(Extension(store.clone()))
         
     };
@@ -280,6 +406,7 @@ async fn main() -> anyhow::Result<()> {
         .layer(Extension(pose_bcast_tx.clone()))
         .layer(Extension(voice_bcast_tx.clone()));
     let app = app.layer(Extension(ai_bcast_tx.clone()));
+    let app = app.layer(Extension(council_bcast_tx.clone()));
 
     // Serve static TTS/audio files from `backend/data/audio` at `/audio/{file...}`
     let app = app.route(
