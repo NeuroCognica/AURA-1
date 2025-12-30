@@ -101,9 +101,9 @@ function deriveState(state: AuthorityState): void {
 
   state.gates.renderAllowed = block === "none";
   state.gates.toolsAllowed = block === "none";
-  state.gates.inputAllowed =
-    block === "none" ||
-    (block === "require_consent" && state.requiredNext?.kind === "consent");
+  // Input is only allowed when there is no active block.
+  // Consent submission is handled separately by the submit_consent action.
+  state.gates.inputAllowed = block === "none";
 }
 
 export type CouncilEvent =
