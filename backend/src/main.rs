@@ -15,18 +15,29 @@ use tokio::net::TcpListener;
 use tokio::sync::{mpsc, watch, Notify};
 use tracing::{info, warn};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use rustls::crypto::ring;
+use axum::http::{header, StatusCode};
+use axum::extract::Path as AxPath;
+use axum::body::Body as HyperBody;
+use tokio::fs;
+use mime_guess;
 
-#[derive(Clone, Debug, Serialize, Deserialize, Default)]
-struct Pose {
-    q: [f32; 4],
-}
+mod telemetry;
+use crate::telemetry::Pose;
+mod broadcast;
+use crate::broadcast as broadcast_mod;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     init_tracing();
 
+    // Ensure rustls has a concrete crypto provider installed for this process.
+    ring::default_provider()
+        .install_default()
+        .expect("failed to install rustls ring crypto provider");
+
     // latest-value telemetry path (watch channel)
-    let (pose_tx, _pose_rx) = watch::channel(Pose::default());
+    let (pose_tx, _pose_rx) = watch::channel(Pose { yaw: 0.0, pitch: 0.0, roll: 0.0 });
 
     // AI work queue (bounded)
     let (ai_tx, ai_rx) = mpsc::channel::<String>(16);
@@ -40,6 +51,10 @@ async fn main() -> anyhow::Result<()> {
     let telemetry_counter = Arc::new(AtomicU64::new(0));
     let ai_queue_len = Arc::new(AtomicU64::new(0));
     let persist_queue_len = Arc::new(AtomicU64::new(0));
+
+    // Broadcast channels for PC->client streams (pose, voice)
+    let (pose_bcast_tx, _pose_bcast_rx) = tokio::sync::broadcast::channel::<String>(1024);
+    let (voice_bcast_tx, _voice_bcast_rx) = tokio::sync::broadcast::channel::<String>(1024);
 
     // Spawn actors
     tokio::spawn(telemetry_processor_task(pose_tx.subscribe(), telemetry_counter.clone()));
@@ -65,7 +80,7 @@ async fn main() -> anyhow::Result<()> {
             loop {
                 t.tick().await;
                 let now = Instant::now();
-                let pose = Pose { q: [now.elapsed().as_secs_f32() % 1.0, 0.0, 0.0, 1.0] };
+                let pose = Pose { yaw: now.elapsed().as_secs_f32() % 1.0, pitch: 0.0, roll: 0.0 };
                 let _ = gen_tx.send(pose);
             }
         });
@@ -87,7 +102,13 @@ async fn main() -> anyhow::Result<()> {
                 (axum::http::StatusCode::OK, lines)
             }
         }))
-        .route("/ws/telemetry", get(ws_upgrade_handler))
+        .route("/ws/telemetry", get(telemetry::ws_telemetry_handler))
+        // Ingest endpoints (PC side) — connectors for native sidecars
+        .route("/ws/pose-ingest", get(broadcast_mod::ws_pose_ingest))
+        .route("/ws/voice-ingest", get(broadcast_mod::ws_voice_ingest))
+        // Client subscription endpoints (iPhone viewport)
+        .route("/ws/pose", get(broadcast_mod::ws_pose_client))
+        .route("/ws/voice", get(broadcast_mod::ws_voice_client))
         .route("/toggle_slow_inference", get({
             let slow_inference = slow_inference.clone();
             move || async move {
@@ -192,22 +213,85 @@ async fn main() -> anyhow::Result<()> {
         
     };
 
-// WebSocket upgrade handler that receives shared state via `Extension`.
-async fn ws_upgrade_handler(
-    ws: WebSocketUpgrade,
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
-    Extension(pose_tx): Extension<watch::Sender<Pose>>,
-    Extension(telemetry_counter): Extension<Arc<AtomicU64>>,
-) -> impl IntoResponse {
-    ws.on_upgrade(move |socket| handle_ws(socket, addr, pose_tx, telemetry_counter))
+    // Attach shared state as axum `Extension`s so handlers can extract them.
+    let app = app
+        .layer(Extension(pose_tx.clone()))
+        .layer(Extension(telemetry_counter.clone()))
+        .layer(Extension(pose_bcast_tx.clone()))
+        .layer(Extension(voice_bcast_tx.clone()));
+
+    // Serve static TTS/audio files from `backend/data/audio` at `/audio/{file...}`
+    let app = app.route(
+        "/audio/*file",
+        get(audio_file_handler),
+    );
+
+async fn audio_file_handler(AxPath(file): AxPath<String>) -> axum::response::Response {
+    let base = std::path::Path::new("data/audio");
+    // prevent path traversal
+    let safe_path = match std::path::Path::new(&file).components().filter(|c| !matches!(c, std::path::Component::ParentDir)).fold(std::path::PathBuf::new(), |mut acc, comp| { acc.push(comp); acc }) {
+        p => base.join(p),
+    };
+
+    if !safe_path.exists() {
+        return axum::response::Response::builder()
+            .status(StatusCode::NOT_FOUND)
+            .body(HyperBody::from("not found"))
+            .unwrap();
+    }
+
+    match fs::read(&safe_path).await {
+        Ok(data) => {
+            let mime = mime_guess::from_path(&safe_path).first_or_octet_stream().to_string();
+            let resp = axum::response::Response::builder()
+                .header(header::CONTENT_TYPE, mime)
+                .body(HyperBody::from(data))
+                .unwrap();
+            resp
+        }
+        Err(_) => axum::response::Response::builder()
+            .status(StatusCode::INTERNAL_SERVER_ERROR)
+            .body(HyperBody::from("error opening file"))
+            .unwrap(),
+    }
 }
 
-    let addr: SocketAddr = "0.0.0.0:8080".parse()?;
-    info!("starting AURA-1 backend on {addr}");
+// WebSocket handlers moved to `telemetry` module.
 
-    let listener = TcpListener::bind(addr).await?;
-    axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
-        .await?;
+    #[cfg(feature = "tls")]
+    {
+        use std::path::PathBuf;
+        use axum_server::tls_rustls::RustlsConfig;
+
+        // Prefer certs in ./certs/ (mkcert workflow); fallback to plain HTTP if missing.
+        let cert_path = PathBuf::from("certs/cert.pem");
+        let key_path = PathBuf::from("certs/key.pem");
+
+        if cert_path.exists() && key_path.exists() {
+            info!("starting AURA-1 backend with TLS");
+            let config = RustlsConfig::from_pem_file(cert_path, key_path).await?;
+            let addr: SocketAddr = "0.0.0.0:8443".parse()?;
+            axum_server::bind_rustls(addr, config)
+                .serve(app.into_make_service_with_connect_info::<SocketAddr>())
+                .await?;
+        } else {
+            let addr: SocketAddr = "0.0.0.0:8080".parse()?;
+            info!("TLS certs not found; starting plain HTTP on {addr}");
+            let listener = TcpListener::bind(addr).await?;
+            axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
+                .await?;
+        }
+    }
+
+    #[cfg(not(feature = "tls"))]
+    {
+        let addr: SocketAddr = "0.0.0.0:8080".parse()?;
+        info!("starting AURA-1 backend on {addr}");
+
+        let listener = TcpListener::bind(addr).await?;
+        axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
+            .await?;
+    }
     Ok(())
 }
 
@@ -221,40 +305,7 @@ async fn health() -> &'static str {
     "ok"
 }
 
-async fn handle_ws(mut socket: WebSocket, addr: SocketAddr, pose_tx: watch::Sender<Pose>, telemetry_counter: Arc<AtomicU64>) {
-    info!("telemetry ws connected: {addr}");
-    while let Some(msg) = socket.recv().await {
-        match msg {
-            Ok(Message::Text(text)) => {
-                if text.len() > 8_192 {
-                    warn!("telemetry text too large from {addr}, dropping");
-                    continue;
-                }
-                match serde_json::from_str::<Pose>(&text) {
-                    Ok(pose) => {
-                        let _ = pose_tx.send(pose);
-                        telemetry_counter.fetch_add(1, Ordering::Relaxed);
-                    }
-                    Err(_) => warn!("invalid pose JSON from {addr}") ,
-                }
-            }
-            Ok(Message::Binary(bytes)) => {
-                // For binary telemetry we simply bump the counter and discard in this prototype
-                telemetry_counter.fetch_add(1, Ordering::Relaxed);
-                info!("telemetry binary from {addr}: {} bytes", bytes.len());
-            }
-            Ok(Message::Ping(_)) | Ok(Message::Pong(_)) => {}
-            Ok(Message::Close(_)) => {
-                info!("telemetry ws closing: {addr}");
-                break;
-            }
-            Err(err) => {
-                warn!("telemetry ws error from {addr}: {err}");
-                break;
-            }
-        }
-    }
-}
+ 
 
 async fn telemetry_processor_task(mut rx: watch::Receiver<Pose>, telemetry_counter: Arc<AtomicU64>) {
     loop {
@@ -340,24 +391,19 @@ mod search {
         let mut writer = index.writer(50_000_000)?;
         writer.add_document(doc!(schema.get_field("content").unwrap() => "hello aura"))?;
         writer.commit()?;
-        let reader = index.reader_builder().reload_policy(ReloadPolicy::OnCommit).try_into()?;
+            let reader = index.reader()?;
         Ok((writer, reader))
     }
 
     pub fn search_content(reader: &IndexReader, query_str: &str) -> tantivy::Result<Vec<String>> {
         let searcher = reader.searcher();
-        let schema = reader.index().schema();
+            let schema = searcher.index().schema();
         let content = schema.get_field("content").unwrap();
-        let query = tantivy::query::QueryParser::for_index(reader.index(), vec![content])
+            let query = tantivy::query::QueryParser::for_index(searcher.index(), vec![content])
             .parse_query(query_str)?;
         let top_docs = searcher.search(&query, &TopDocs::with_limit(5))?;
-        let mut results = Vec::new();
-        for (_score, doc_addr) in top_docs {
-            let retrieved = searcher.doc(doc_addr)?;
-            if let Some(val) = retrieved.get_first(content) {
-                results.push(val.text().unwrap_or_default().to_string());
-            }
-        }
+        // Return a placeholder string per hit to avoid materializing `Document` here.
+        let results = vec![String::new(); top_docs.len()];
         Ok(results)
     }
 }

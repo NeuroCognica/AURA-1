@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>AURA Telemetry Emitter</title>
+  <style>body{font-family:system-ui,Segoe UI,Roboto,Arial;margin:20px}button{padding:8px 12px}</style>
+</head>
+<body>
+  <h1>AURA Telemetry Emitter</h1>
+  <p id="status">status: idle</p>
+  <button id="connect">Connect</button>
+  <button id="disconnect" disabled>Disconnect</button>
+  <script>
+    const statusEl = document.getElementById('status');
+    const connectBtn = document.getElementById('connect');
+    const disconnectBtn = document.getElementById('disconnect');
+
+    let ws = null;
+    const session = crypto.randomUUID();
+    let seq = 0;
+    let pose = { yaw: 0, pitch: 0, roll: 0 };
+    let intervalId = null;
+    let heartbeatId = null;
+
+    function nowSec() { return Date.now() / 1000; }
+
+    function makeUrl() {
+      if (location.protocol === 'https:') {
+        return `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws/telemetry`;
+      }
+      // fallback when opened as file or from http dev server
+      return 'wss://127.0.0.1:8443/ws/telemetry';
+    }
+
+    function sendEnvelope(type, payload) {
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      seq += 1;
+      const env = {
+        type,
+        session,
+        ts: nowSec(),
+        seq,
+        payload: payload || {}
+      };
+      ws.send(JSON.stringify(env));
+    }
+
+    function startEmission() {
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      // emit pose at ~60Hz
+      intervalId = setInterval(() => {
+        sendEnvelope('telemetry', { pose });
+      }, 1000 / 60);
+
+      // heartbeat every 5s
+      heartbeatId = setInterval(() => {
+        sendEnvelope('heartbeat', {});
+      }, 5000);
+    }
+
+    function stopEmission() {
+      clearInterval(intervalId); intervalId = null;
+      clearInterval(heartbeatId); heartbeatId = null;
+    }
+
+    // device orientation fallback
+    let haveDevice = false;
+    window.addEventListener('deviceorientation', (e) => {
+      haveDevice = true;
+      const toRad = (d) => (d == null ? 0 : d * Math.PI / 180);
+      // alpha = rotation around z axis (0..360) -> yaw
+      // beta  = rotation around x axis (-180..180) -> pitch
+      // gamma = rotation around y axis (-90..90) -> roll
+      pose.yaw = toRad(e.alpha);
+      pose.pitch = toRad(e.beta);
+      pose.roll = toRad(e.gamma);
+    });
+
+    // If deviceorientation isn't available, produce a slow synthetic rotation
+    setInterval(() => {
+      if (haveDevice) return;
+      const t = Date.now() / 1000;
+      pose.yaw = (t % (Math.PI * 2));
+      pose.pitch = Math.sin(t) * 0.1;
+      pose.roll = Math.cos(t) * 0.05;
+    }, 50);
+
+    connectBtn.addEventListener('click', () => {
+      const url = makeUrl();
+      statusEl.textContent = 'status: connecting to ' + url;
+      try {
+        ws = new WebSocket(url);
+      } catch (err) {
+        statusEl.textContent = 'status: connection failed';
+        return;
+      }
+      ws.onopen = () => {
+        statusEl.textContent = 'status: connected';
+        connectBtn.disabled = true;
+        disconnectBtn.disabled = false;
+        startEmission();
+      };
+      ws.onclose = () => {
+        statusEl.textContent = 'status: closed';
+        connectBtn.disabled = false;
+        disconnectBtn.disabled = true;
+        stopEmission();
+      };
+      ws.onerror = (ev) => {
+        statusEl.textContent = 'status: ws error';
+      };
+      ws.onmessage = (m) => {
+        // placeholder for server -> client messages (acks/commands)
+        console.debug('server msg', m.data);
+      };
+    });
+
+    disconnectBtn.addEventListener('click', () => {
+      if (ws) ws.close();
+    });
+  </script>
+</body>
+</html>

@@ -16,12 +16,22 @@ uuid = { workspace = true }
 anyhow = { workspace = true }
 base64 = "0.21"
 chrono = { version = "0.4", features = ["serde"] }
+futures-util = "0.3"
+tower-http = { version = "0.3", features = ["fs"] }
+tokio-util = "0.7"
+mime_guess = "2.0"
+hyper = "1.8"
 [dev-dependencies]
 tempfile = "3"
 
 [dependencies.axum-server]
-workspace = true
+version = "0.7"
 optional = true
+features = ["tls-rustls-no-provider"]
+
+[dependencies.rustls]
+version = "0.23"
+features = ["ring"]
 
 [features]
 default = ["telemetry"]

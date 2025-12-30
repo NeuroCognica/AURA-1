@@ -1,0 +1,10 @@
+sounddevice>=0.4.6
+numpy>=1.24
+webrtcvad>=2.0.10
+websockets>=11.0.3
+soundfile>=0.12.1
+# Optional high-quality STT (install if you want wake-word via transcription)
+# Install with: pip install openai-whisper
+# Note: Whisper requires ffmpeg and may need additional dependencies on Windows.
+mediapipe>=0.10.0
+opencv-python>=4.7
