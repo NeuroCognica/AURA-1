@@ -110,6 +110,7 @@ async fn main() -> anyhow::Result<()> {
         // Client subscription endpoints (iPhone viewport)
         .route("/ws/pose", get(broadcast_mod::ws_pose_client))
         .route("/ws/voice", get(broadcast_mod::ws_voice_client))
+        .route("/ws/ai", get(broadcast_mod::ws_ai_handler))
         .route("/toggle_slow_inference", get({
             let slow_inference = slow_inference.clone();
             move || async move {

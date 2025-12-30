@@ -73,3 +73,43 @@ async fn handle_client(mut socket: WebSocket, mut rx: broadcast::Receiver<String
     }
     info!("client socket disconnected");
 }
+
+// Read-only WS endpoint for AI token deltas. Mirrors pose/voice client behavior.
+pub async fn ws_ai_handler(
+    ws: WebSocketUpgrade,
+    Extension(ai_bcast): Extension<broadcast::Sender<String>>,
+) -> impl IntoResponse {
+    ws.on_upgrade(move |socket| handle_ai_socket(socket, ai_bcast))
+}
+
+async fn handle_ai_socket(mut socket: WebSocket, ai_bcast: broadcast::Sender<String>) {
+    info!("ai client socket connected");
+    let mut rx = ai_bcast.subscribe();
+
+    loop {
+        tokio::select! {
+            biased;
+            recv = rx.recv() => {
+                match recv {
+                    Ok(delta) => {
+                        if socket.send(Message::Text(delta)).await.is_err() {
+                            break;
+                        }
+                    }
+                    Err(broadcast::error::RecvError::Lagged(_)) => {
+                        // client fell behind; skip
+                        continue;
+                    }
+                    Err(broadcast::error::RecvError::Closed) => break,
+                }
+            }
+            // handle client-side messages (ignore payload, allow disconnect)
+            ws_msg = socket.next() => {
+                if ws_msg.is_none() {
+                    break;
+                }
+            }
+        }
+    }
+    info!("ai client socket disconnected");
+}
