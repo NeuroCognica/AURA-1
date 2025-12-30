@@ -17,6 +17,7 @@ use tracing::{info, warn};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use rustls::crypto::ring;
 use axum::http::{header, StatusCode};
+use base64::Engine;
 use axum::extract::Path as AxPath;
 use axum::body::Body as HyperBody;
 use tokio::fs;

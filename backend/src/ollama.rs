@@ -1,9 +1,12 @@
 use axum::{extract::Json, Extension};
+use axum::http::StatusCode;
 use bytes::Bytes;
-use futures::StreamExt;
+use futures::{Stream, StreamExt};
+use std::pin::Pin;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use crate::storage::RocksStore;
 use tokio::sync::broadcast;
 use tracing::{debug, info, warn};
 
@@ -42,13 +45,15 @@ struct OllamaAssistantMsg {
     content: String,
 }
 
+pub type BoxedTextStream = Pin<Box<dyn Stream<Item = anyhow::Result<String>> + Send>>;
+
 async fn stream_ollama_chat(
     ollama_url: &str,
     model: &str,
     system: &str,
     retrieval_block: Option<String>,
     history: &[ChatMsg],
-) -> anyhow::Result<impl futures::Stream<Item = anyhow::Result<String>>> {
+) -> anyhow::Result<BoxedTextStream> {
     let mut messages: Vec<OllamaMsg> = Vec::new();
 
     messages.push(OllamaMsg {
@@ -118,34 +123,29 @@ async fn stream_ollama_chat(
         },
     );
 
-    Ok(s)
+    Ok(Box::pin(s))
 }
 
 /// Persistence-enabled `/api/chat` handler. Requires `persistence` feature.
 #[cfg(feature = "persistence")]
+#[axum::debug_handler]
 pub async fn chat_handler(
-    Json(payload): Json<serde_json::Value>,
     Extension(ai_bcast): Extension<broadcast::Sender<String>>,
-    Extension(store): Extension<std::sync::Arc<crate::RocksStore>>,
-) -> axum::response::Response {
+    Extension(store): Extension<Arc<RocksStore>>,
+    Json(payload): Json<serde_json::Value>,
+) -> impl axum::response::IntoResponse {
     // Require `session_id` and `text` fields
     let session_id = match payload.get("session_id").and_then(|v| v.as_str()) {
         Some(s) => s.to_string(),
         None => {
-            return axum::response::Response::builder()
-                .status(axum::http::StatusCode::BAD_REQUEST)
-                .body(axum::body::boxed(axum::body::Full::from("missing session_id")))
-                .unwrap();
+            return (StatusCode::BAD_REQUEST, "missing session_id");
         }
     };
 
     let text = match payload.get("text").and_then(|v| v.as_str()) {
         Some(t) => t.to_string(),
         None => {
-            return axum::response::Response::builder()
-                .status(axum::http::StatusCode::BAD_REQUEST)
-                .body(axum::body::boxed(axum::body::Full::from("missing text")))
-                .unwrap();
+            return (StatusCode::BAD_REQUEST, "missing text");
         }
     };
 
@@ -238,8 +238,5 @@ pub async fn chat_handler(
         }
     });
 
-    axum::response::Response::builder()
-        .status(axum::http::StatusCode::ACCEPTED)
-        .body(axum::body::boxed(axum::body::Full::from("streaming")))
-        .unwrap()
+    (StatusCode::ACCEPTED, "streaming")
 }
