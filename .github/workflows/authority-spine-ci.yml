@@ -12,7 +12,23 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        features: [ "persistence", "persistence search tls" ]
+        include:
+              - name: no-features
+                features: ""
+              - name: search
+                features: "search"
+              - name: tls
+                features: "tls"
+              - name: persistence
+                features: "persistence"
+              - name: persistence-search
+                features: "persistence search"
+              - name: persistence-tls
+                features: "persistence tls"
+              - name: search-tls
+                features: "search tls"
+              - name: persistence-search-tls
+                features: "persistence search tls"
 
     steps:
       - name: Checkout
@@ -35,7 +51,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-${{ matrix.features }}-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-${{ matrix.include.name }}-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Rust fmt check
         run: |
@@ -46,14 +62,14 @@ jobs:
           cargo clippy --all-targets --all-features -- -D warnings
         continue-on-error: false
 
-      - name: Run tests (features: ${{ matrix.features }})
+      - name: Run tests (features: ${{ matrix.include.features }})
         env:
           RUSTFLAGS: "-C target-cpu=native"
         run: |
-          if [ -z "${{ matrix.features }}" ]; then
+          if [ -z "${{ matrix.include.features }}" ]; then
             cargo test --all -- --nocapture
           else
-            cargo test --all --features "${{ matrix.features }}" -- --nocapture
+            cargo test --all --features "${{ matrix.include.features }}" -- --nocapture
           fi
 
       - name: Explicit replay integration test (persistence+search+tls)
@@ -64,8 +80,8 @@ jobs:
 
       - name: Release build
         run: |
-          if [ -z "${{ matrix.features }}" ]; then
+          if [ -z "${{ matrix.include.features }}" ]; then
             cargo build --release
           else
-            cargo build --release --features "${{ matrix.features }}"
+            cargo build --release --features "${{ matrix.include.features }}"
           fi
