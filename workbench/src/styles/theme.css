@@ -1,0 +1,17 @@
+.workbench-root{
+  transition: background 400ms ease, color 300ms ease, box-shadow 350ms ease;
+}
+:root{
+  --bg-primary: #071124;
+  --bg-secondary: #0b2740;
+  --text-primary: #e6f0ff;
+  --accent: #00d1ff;
+  --panel-glass: rgba(255,255,255,0.04);
+  --glow-color: #00d1ff;
+  --app-font-family: Inter, Roboto, system-ui, sans-serif;
+}
+
+.aura-panel{background:linear-gradient(180deg,var(--bg-primary),var(--bg-secondary));color:var(--text-primary);font-family:var(--app-font-family)}
+.emphasize-left{transform:translateX(-4px) scale(1.02);}
+.emphasize-center{transform:scale(1.02);}
+.emphasize-right{transform:translateX(4px) scale(1.02);}
