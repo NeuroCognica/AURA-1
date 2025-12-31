@@ -1,0 +1,71 @@
+name: Authority Spine CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-test:
+    name: Build, Lint & Test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        features: [ "persistence", "persistence search tls" ]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake nasm
+
+      - name: Install Rust toolchain
+        uses: ashald/setup-rust@v1
+        with:
+          toolchain: stable
+
+      - name: Cache cargo registry and build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ matrix.features }}-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Rust fmt check
+        run: |
+          cargo fmt -- --check
+
+      - name: Clippy (deny warnings)
+        run: |
+          cargo clippy --all-targets --all-features -- -D warnings
+        continue-on-error: false
+
+      - name: Run tests (features: ${{ matrix.features }})
+        env:
+          RUSTFLAGS: "-C target-cpu=native"
+        run: |
+          if [ -z "${{ matrix.features }}" ]; then
+            cargo test --all -- --nocapture
+          else
+            cargo test --all --features "${{ matrix.features }}" -- --nocapture
+          fi
+
+      - name: Explicit replay integration test (persistence+search+tls)
+        if: github.ref == 'refs/heads/main'
+        run: |
+          cd backend
+          cargo test --test ws_replay_integration --features "persistence search tls" -- --nocapture
+
+      - name: Release build
+        run: |
+          if [ -z "${{ matrix.features }}" ]; then
+            cargo build --release
+          else
+            cargo build --release --features "${{ matrix.features }}"
+          fi
