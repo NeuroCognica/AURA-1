@@ -1,0 +1,17 @@
+[package]
+name = "aura-sentinel"
+version = "0.1.0"
+edition = "2021"
+description = "Sentinel archetype runtime (scaffold)"
+
+[dependencies]
+reqwest = { version = "0.11", features = ["json"] }
+async-trait = "0.1"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
+thiserror = "1.0"
+
+[lib]
+name = "aura_sentinel"
+path = "src/lib.rs"
