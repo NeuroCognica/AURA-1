@@ -41,10 +41,11 @@
 	* [x] Set up Rust toolchain installation (stable)
 	* [x] Add `cmake` and `nasm` as build dependencies
 	* [x] Configure cargo cache for faster builds
-* [ ] Add test matrix for feature combinations
-	* [ ] Test with `persistence` feature enabled
+* [x] Add test matrix for feature combinations
+	* [x] Test with `persistence` feature enabled
 	* [ ] Test with `persistence` feature disabled
-	* [ ] Test with `search` feature enabled/disabled
+	* [x] Test with `search` feature enabled
+	* [ ] Test with `search` feature disabled
 * [ ] Configure test execution
 	* [ ] Run `cargo test --all-features`
 	* [ ] Run `cargo test --no-default-features`

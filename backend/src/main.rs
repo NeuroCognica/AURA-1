@@ -17,6 +17,8 @@ use tokio::net::TcpListener;
 use tokio::sync::{mpsc, watch, Notify};
 use tracing::{info, warn};
 
+use aura_backend::storage;
+
 mod telemetry;
 use crate::telemetry::Pose;
 mod broadcast;
@@ -670,9 +672,8 @@ async fn persistence_worker_task(
     }
 }
 
-#[cfg(feature = "persistence")]
-#[allow(dead_code)]
-mod storage;
+// `storage` module is declared at crate root (backend/src/storage.rs)
+// storage implementation is feature-gated inside the module file itself.
 
 #[cfg(feature = "search")]
 #[allow(dead_code)]

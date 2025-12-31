@@ -1,5 +1,5 @@
 use crate::council_verdict::*;
-use crate::storage::RocksStore;
+use aura_backend::storage::RocksStore;
 use serde_json::json;
 use thiserror::Error;
 
@@ -155,7 +155,7 @@ use axum::{extract::Extension, Json};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-use crate::storage;
+use aura_backend::storage;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct AppealRequest {

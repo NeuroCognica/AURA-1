@@ -420,3 +420,61 @@ mod __storage_impl {
 // Re-export items at crate level when feature is enabled
 #[cfg(feature = "persistence")]
 pub use __storage_impl::RocksStore;
+
+// Provide a minimal stub implementation when `persistence` feature is disabled
+#[cfg(not(feature = "persistence"))]
+mod __storage_stub {
+    use std::path::Path;
+    use serde::{Deserialize, Serialize};
+
+    #[derive(Clone)]
+    pub struct RocksStore;
+
+    #[derive(Clone, Debug, Serialize, Deserialize)]
+    pub struct LogEntry {
+        pub id: u64,
+        pub timestamp_ms: i64,
+        pub speaker: String,
+        pub content: String,
+    }
+
+    impl RocksStore {
+        pub fn open(_path: impl AsRef<Path>) -> anyhow::Result<Self> {
+            Err(anyhow::anyhow!("RocksStore unavailable: build without `persistence` feature"))
+        }
+
+        pub fn get_last_id(&self) -> anyhow::Result<u64> {
+            Err(anyhow::anyhow!("RocksStore unavailable: persistence disabled"))
+        }
+
+        pub fn append_log_atomic(&self, _speaker: &str, _content: &str) -> anyhow::Result<u64> {
+            Err(anyhow::anyhow!("RocksStore unavailable: persistence disabled"))
+        }
+
+        pub fn append_council_envelope_with<F>(&self, _session_id: &str, _f: F) -> anyhow::Result<u64>
+        where
+            F: FnOnce(u64) -> Vec<u8>,
+        {
+            Err(anyhow::anyhow!("RocksStore unavailable: persistence disabled"))
+        }
+
+        pub fn get_council_envelope(&self, _session_id: &str, _seq: u64) -> anyhow::Result<Option<Vec<u8>>> {
+            Err(anyhow::anyhow!("RocksStore unavailable: persistence disabled"))
+        }
+
+        pub fn get_bytes(&self, _key: &[u8]) -> anyhow::Result<Option<Vec<u8>>> {
+            Err(anyhow::anyhow!("RocksStore unavailable: persistence disabled"))
+        }
+
+        pub fn put_bytes(&self, _key: &[u8], _val: &[u8]) -> anyhow::Result<()> {
+            Err(anyhow::anyhow!("RocksStore unavailable: persistence disabled"))
+        }
+
+        pub fn load_recent_chat(&self, _session_id: &str, _limit: usize) -> anyhow::Result<Vec<LogEntry>> {
+            Ok(Vec::new())
+        }
+    }
+}
+
+#[cfg(not(feature = "persistence"))]
+pub use __storage_stub::RocksStore;

@@ -1,4 +1,4 @@
-#![cfg(feature = "persistence")]
+#![cfg(all(feature = "persistence", feature = "tls"))]
 
 use aura_backend::{broadcast, council_verdict, storage};
 use axum::{extract::Extension, routing::get, Router};
