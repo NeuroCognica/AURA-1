@@ -1,5 +1,8 @@
+#![cfg(feature = "persistence")]
 use aura_backend::storage::RocksStore;
 use tempfile::TempDir;
+
+
 
 #[test]
 fn append_and_prove_and_snapshot() {

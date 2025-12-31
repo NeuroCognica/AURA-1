@@ -1,8 +1,10 @@
-use tempfile::TempDir;
+#![cfg(feature = "persistence")]
+
 use aura_backend::storage::RocksStore;
-use tokio::sync::broadcast;
 use std::sync::Arc;
 use std::time::Duration;
+use tempfile::TempDir;
+use tokio::sync::broadcast;
 
 #[tokio::test]
 async fn generation_is_cancelled_on_blocking_council_msg() {
@@ -44,7 +46,15 @@ async fn generation_is_cancelled_on_blocking_council_msg() {
     assert!(first.is_ok(), "expected initial token before cancel");
 
     // Now broadcast a blocking council verdict that should cancel the generation
-    aura_backend::broadcast::broadcast_council(&store, &council_tx, None, "s1", "verdict", serde_json::json!({"final_state": "deny"}), Some(&gen_mgr));
+    aura_backend::broadcast::broadcast_council(
+        &store,
+        &council_tx,
+        None,
+        "s1",
+        "verdict",
+        serde_json::json!({"final_state": "deny"}),
+        Some(&gen_mgr),
+    );
 
     // Wait for end envelope
     let got_end = tokio::time::timeout(Duration::from_secs(2), async {
@@ -55,7 +65,11 @@ async fn generation_is_cancelled_on_blocking_council_msg() {
                 }
             }
         }
-    }).await;
+    })
+    .await;
 
-    assert!(got_end.is_ok() && got_end.unwrap(), "expected end envelope after cancellation");
+    assert!(
+        got_end.is_ok() && got_end.unwrap(),
+        "expected end envelope after cancellation"
+    );
 }

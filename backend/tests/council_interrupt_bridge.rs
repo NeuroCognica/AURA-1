@@ -1,5 +1,7 @@
-use tempfile::TempDir;
+#![cfg(feature = "persistence")]
+
 use aura_backend::storage::RocksStore;
+use tempfile::TempDir;
 use tokio::sync::broadcast;
 
 #[test]
@@ -28,21 +30,37 @@ fn council_interrupt_forwarding_minimal() {
     };
 
     // Serialize and persist via broadcast_council helper
-    aura_backend::broadcast::broadcast_council(&std::sync::Arc::new(store), &council_tx, None, "s123", "interrupt", interrupt_payload.clone(), None);
+    aura_backend::broadcast::broadcast_council(
+        &std::sync::Arc::new(store),
+        &council_tx,
+        None,
+        "s123",
+        "interrupt",
+        interrupt_payload.clone(),
+        None,
+    );
 
     // council_rx should receive the raw stored JSON string
     let received = council_rx.try_recv().expect("council message received");
     // It should parse to CouncilWsMsg and be an interrupt
-    let parsed: aura_backend::council_verdict::CouncilWsMsg = serde_json::from_str(&received).expect("parse council msg");
+    let parsed: aura_backend::council_verdict::CouncilWsMsg =
+        serde_json::from_str(&received).expect("parse council msg");
     assert_eq!(parsed.kind, "interrupt");
     assert_eq!(parsed.session_id, "s123");
     assert!(parsed.payload.get("reason").is_some());
 
     // Now build the minimal notice using the library helper
-    let minimal = aura_backend::broadcast::build_ai_interrupt_notice_from_council(&received).expect("should build minimal notice");
+    let minimal = aura_backend::broadcast::build_ai_interrupt_notice_from_council(&received)
+        .expect("should build minimal notice");
     let mval: serde_json::Value = serde_json::from_str(&minimal).expect("parse minimal");
-    assert_eq!(mval.get("type").and_then(|v| v.as_str()).unwrap_or("") , "notice");
-    assert_eq!(mval.get("notice").and_then(|v| v.as_str()).unwrap_or("") , "interrupt");
+    assert_eq!(
+        mval.get("type").and_then(|v| v.as_str()).unwrap_or(""),
+        "notice"
+    );
+    assert_eq!(
+        mval.get("notice").and_then(|v| v.as_str()).unwrap_or(""),
+        "interrupt"
+    );
 
     // Ensure minimal payload does NOT include full requirements field
     let p = &mval["payload"];

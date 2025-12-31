@@ -16,7 +16,9 @@ struct ActiveGen {
 
 impl GenerationManager {
     pub fn new() -> Self {
-        Self { inner: Arc::new(Mutex::new(HashMap::new())) }
+        Self {
+            inner: Arc::new(Mutex::new(HashMap::new())),
+        }
     }
 
     pub async fn start_new(&self, sid: &str) -> (String, CancellationToken) {
@@ -29,7 +31,13 @@ impl GenerationManager {
         let gen_id = format!("g-{}", Uuid::new_v4());
         let cancel = CancellationToken::new();
 
-        map.insert(sid.to_string(), ActiveGen { gen_id: gen_id.clone(), cancel: cancel.clone() });
+        map.insert(
+            sid.to_string(),
+            ActiveGen {
+                gen_id: gen_id.clone(),
+                cancel: cancel.clone(),
+            },
+        );
         (gen_id, cancel)
     }
 

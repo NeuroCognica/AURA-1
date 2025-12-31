@@ -7,10 +7,12 @@ use std::sync::Arc;
 // `storage::RocksStore` is only available when the `persistence` feature
 // is enabled. Guard the import so this file compiles regardless of
 // whether the feature is active.
+use crate::council_verdict::{
+    now_ms, CouncilClientMsg, CouncilEnvelope, CouncilMsgType, CouncilWsMsg,
+};
 #[cfg(feature = "persistence")]
 use crate::storage::RocksStore;
 use serde_json::Value as JsonValue;
-use crate::council_verdict::{CouncilWsMsg, CouncilEnvelope, CouncilClientMsg, CouncilMsgType, now_ms};
 use tokio::sync::broadcast;
 use tracing::{info, warn};
 
@@ -103,11 +105,20 @@ pub async fn ws_council_handler(
 pub async fn ws_council_handler(
     ws: WebSocketUpgrade,
     Extension(council_bcast): Extension<broadcast::Sender<String>>,
-    Extension(council_bcast_typed): Extension<broadcast::Sender<crate::council_verdict::CouncilEnvelope>>,
+    Extension(council_bcast_typed): Extension<
+        broadcast::Sender<crate::council_verdict::CouncilEnvelope>,
+    >,
     Extension(store): Extension<Option<Arc<RocksStore>>>,
 ) -> impl IntoResponse {
     let store = store.expect("persistence store created");
-    ws.on_upgrade(move |socket| handle_council_socket_typed(socket, council_bcast_typed.subscribe(), council_bcast.subscribe(), store.clone()))
+    ws.on_upgrade(move |socket| {
+        handle_council_socket_typed(
+            socket,
+            council_bcast_typed.subscribe(),
+            council_bcast.subscribe(),
+            store.clone(),
+        )
+    })
 }
 
 /// Build a minimal, non-authoritative AI notice from a stored `CouncilWsMsg` JSON string.
@@ -119,10 +130,23 @@ pub fn build_ai_interrupt_notice_from_council(msg: &str) -> Option<String> {
         }
         // Extract minimal fields: kind, scope, reason, correlation (if present)
         let payload = cmsg.payload;
-        let kind = payload.get("kind").and_then(|v| v.as_str()).unwrap_or("interrupt");
-        let scope = payload.get("scope").cloned().unwrap_or(serde_json::json!(null));
-        let reason = payload.get("reason").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let correlation = payload.get("correlation").cloned().unwrap_or(serde_json::json!(null));
+        let kind = payload
+            .get("kind")
+            .and_then(|v| v.as_str())
+            .unwrap_or("interrupt");
+        let scope = payload
+            .get("scope")
+            .cloned()
+            .unwrap_or(serde_json::json!(null));
+        let reason = payload
+            .get("reason")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let correlation = payload
+            .get("correlation")
+            .cloned()
+            .unwrap_or(serde_json::json!(null));
 
         let notice = serde_json::json!({
             "type": "notice",
@@ -237,8 +261,8 @@ async fn handle_council_socket_typed(
     mut legacy_rx: broadcast::Receiver<String>,
     store: Arc<RocksStore>,
 ) {
-    use std::time::Duration;
     use crate::council_verdict::CouncilClientMsg;
+    use std::time::Duration;
     info!("council client socket connected (typed)");
 
     // Handshake: wait for Hello message with `sid` and optional `last_ack`.
@@ -246,11 +270,15 @@ async fn handle_council_socket_typed(
     let mut sid: Option<String> = None;
     let mut last_acked: u64 = 0;
 
-    if let Ok(Some(Ok(Message::Text(txt)))) = tokio::time::timeout(Duration::from_secs(5), socket.next()).await {
+    if let Ok(Some(Ok(Message::Text(txt)))) =
+        tokio::time::timeout(Duration::from_secs(5), socket.next()).await
+    {
         if let Ok(client_msg) = serde_json::from_str::<CouncilClientMsg>(&txt) {
             if let CouncilClientMsg::Hello { sid: s, last_ack } = client_msg {
                 sid = Some(s);
-                if let Some(a) = last_ack { last_acked = a; }
+                if let Some(a) = last_ack {
+                    last_acked = a;
+                }
             }
         }
     }
@@ -273,7 +301,8 @@ async fn handle_council_socket_typed(
                     }
 
                     // load persisted envelopes and stream them in order
-                    if let Ok(items) = store.load_council_range(&sid_val, last_acked + 1, last_seq) {
+                    if let Ok(items) = store.load_council_range(&sid_val, last_acked + 1, last_seq)
+                    {
                         for b in items {
                             if let Ok(s) = String::from_utf8(b) {
                                 if socket.send(Message::Text(s)).await.is_err() {
@@ -354,7 +383,11 @@ async fn handle_council_socket_typed(
     info!("council client socket disconnected (typed)");
 }
 
-async fn handle_ai_socket(mut socket: WebSocket, ai_bcast: broadcast::Sender<String>, council_bcast: broadcast::Sender<String>) {
+async fn handle_ai_socket(
+    mut socket: WebSocket,
+    ai_bcast: broadcast::Sender<String>,
+    council_bcast: broadcast::Sender<String>,
+) {
     info!("ai client socket connected");
     let mut rx = ai_bcast.subscribe();
     let mut council_rx = council_bcast.subscribe();
@@ -469,25 +502,33 @@ pub fn broadcast_council(
             // If a typed channel is provided, build a typed envelope and persist it
             if let Some(typed) = council_bcast_typed {
                 // Try to map known kinds to typed messages; fallback to Notice
-                use crate::council_verdict::{CouncilMsg, make_council_envelope};
+                use crate::council_verdict::{make_council_envelope, CouncilMsg};
 
                 let typed_msg = match kind {
                     "verdict" => {
-                        if let Ok(v) = serde_json::from_value::<crate::council_verdict::CouncilVerdict>(payload.clone()) {
+                        if let Ok(v) = serde_json::from_value::<
+                            crate::council_verdict::CouncilVerdict,
+                        >(payload.clone())
+                        {
                             CouncilMsg::Verdict(v)
                         } else {
                             CouncilMsg::Notice(payload.clone())
                         }
                     }
                     "appeal_state" => {
-                        if let Ok(sv) = serde_json::from_value::<crate::council_verdict::AppealState>(payload.clone()) {
+                        if let Ok(sv) = serde_json::from_value::<crate::council_verdict::AppealState>(
+                            payload.clone(),
+                        ) {
                             CouncilMsg::AppealState(sv)
                         } else {
                             CouncilMsg::Notice(payload.clone())
                         }
                     }
                     "interrupt" => {
-                        if let Ok(ip) = serde_json::from_value::<crate::council_verdict::InterruptPayload>(payload.clone()) {
+                        if let Ok(ip) = serde_json::from_value::<
+                            crate::council_verdict::InterruptPayload,
+                        >(payload.clone())
+                        {
                             CouncilMsg::Interrupt(ip)
                         } else {
                             CouncilMsg::Notice(payload.clone())
@@ -506,7 +547,8 @@ pub fn broadcast_council(
                 tokio::spawn(async move {
                     match store.append_council_envelope_with(&sid, |seq| {
                         let env = make_council_envelope(&sid, None, seq, typed_msg.clone());
-                        serde_json::to_vec(&env).unwrap_or_else(|_| payload_clone.to_string().into_bytes())
+                        serde_json::to_vec(&env)
+                            .unwrap_or_else(|_| payload_clone.to_string().into_bytes())
                     }) {
                         Ok(seq) => {
                             // Rebuild the envelope with the assigned seq and send it on the typed channel.
@@ -523,24 +565,33 @@ pub fn broadcast_council(
                 // Decide blocking criteria: verdict denies or require_consent, or interrupt
                 match kind {
                     "verdict" => {
-                        if let Some(decision) = payload.get("final_state").and_then(|v| v.as_str()) {
+                        if let Some(decision) = payload.get("final_state").and_then(|v| v.as_str())
+                        {
                             if decision == "deny" || decision == "require_consent" {
                                 let sid = session_id.to_string();
                                 let gm = gm.clone();
-                                tokio::spawn(async move { gm.cancel(&sid).await; });
+                                tokio::spawn(async move {
+                                    gm.cancel(&sid).await;
+                                });
                             }
-                        } else if let Some(decision) = payload.get("decision").and_then(|v| v.as_str()) {
+                        } else if let Some(decision) =
+                            payload.get("decision").and_then(|v| v.as_str())
+                        {
                             if decision == "deny" || decision == "require_consent" {
                                 let sid = session_id.to_string();
                                 let gm = gm.clone();
-                                tokio::spawn(async move { gm.cancel(&sid).await; });
+                                tokio::spawn(async move {
+                                    gm.cancel(&sid).await;
+                                });
                             }
                         }
                     }
                     "interrupt" => {
                         let sid = session_id.to_string();
                         let gm = gm.clone();
-                        tokio::spawn(async move { gm.cancel(&sid).await; });
+                        tokio::spawn(async move {
+                            gm.cancel(&sid).await;
+                        });
                     }
                     _ => {}
                 }
@@ -596,24 +647,33 @@ pub fn broadcast_council(
             if let Some(gm) = gen_mgr {
                 match kind {
                     "verdict" => {
-                        if let Some(decision) = payload.get("final_state").and_then(|v| v.as_str()) {
+                        if let Some(decision) = payload.get("final_state").and_then(|v| v.as_str())
+                        {
                             if decision == "deny" || decision == "require_consent" {
                                 let sid = session_id.to_string();
                                 let gm = gm.clone();
-                                tokio::spawn(async move { gm.cancel(&sid).await; });
+                                tokio::spawn(async move {
+                                    gm.cancel(&sid).await;
+                                });
                             }
-                        } else if let Some(decision) = payload.get("decision").and_then(|v| v.as_str()) {
+                        } else if let Some(decision) =
+                            payload.get("decision").and_then(|v| v.as_str())
+                        {
                             if decision == "deny" || decision == "require_consent" {
                                 let sid = session_id.to_string();
                                 let gm = gm.clone();
-                                tokio::spawn(async move { gm.cancel(&sid).await; });
+                                tokio::spawn(async move {
+                                    gm.cancel(&sid).await;
+                                });
                             }
                         }
                     }
                     "interrupt" => {
                         let sid = session_id.to_string();
                         let gm = gm.clone();
-                        tokio::spawn(async move { gm.cancel(&sid).await; });
+                        tokio::spawn(async move {
+                            gm.cancel(&sid).await;
+                        });
                     }
                     _ => {}
                 }

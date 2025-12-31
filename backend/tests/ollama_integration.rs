@@ -2,7 +2,8 @@ use reqwest::Client;
 
 #[tokio::test]
 async fn ollama_smoke() {
-    let ollama = std::env::var("OLLAMA_URL").unwrap_or_else(|_| "http://127.0.0.1:11434".to_string());
+    let ollama =
+        std::env::var("OLLAMA_URL").unwrap_or_else(|_| "http://127.0.0.1:11434".to_string());
     let client = Client::new();
     let url = format!("{}/api/models", ollama.trim_end_matches('/'));
     match client.get(&url).send().await {

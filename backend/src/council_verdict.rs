@@ -79,10 +79,20 @@ pub enum FinalState {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum NextRequired {
     None,
-    ProvideConsent { verdict_id: VerdictId, exact_phrase: String },
-    ChooseOption { verdict_id: VerdictId, option_ids: Vec<String> },
-    ReframeRequest { hint: String },
-    HardStop { reason: String },
+    ProvideConsent {
+        verdict_id: VerdictId,
+        exact_phrase: String,
+    },
+    ChooseOption {
+        verdict_id: VerdictId,
+        option_ids: Vec<String>,
+    },
+    ReframeRequest {
+        hint: String,
+    },
+    HardStop {
+        reason: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -127,10 +137,22 @@ pub struct OverrideToken {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum AppealState {
     Idle,
-    AwaitingUser { verdict_id: VerdictId, required: NextRequired },
-    Authorized { verdict_id: VerdictId, token: OverrideToken, expires_at_ms: u128 },
-    InAlchemist { verdict_id: VerdictId },
-    Closed { verdict_id: VerdictId, final_state: FinalState },
+    AwaitingUser {
+        verdict_id: VerdictId,
+        required: NextRequired,
+    },
+    Authorized {
+        verdict_id: VerdictId,
+        token: OverrideToken,
+        expires_at_ms: u128,
+    },
+    InAlchemist {
+        verdict_id: VerdictId,
+    },
+    Closed {
+        verdict_id: VerdictId,
+        final_state: FinalState,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -249,24 +271,55 @@ pub enum CouncilMsg {
 /// function assigns `ts_ms` via `now_ms()` and serializes the typed
 /// payload into `payload: serde_json::Value` while mapping to the
 /// existing `CouncilMsgType` so the on-wire JSON remains unchanged.
-pub fn make_council_envelope(sid: &str, vid: Option<String>, seq: u64, msg: CouncilMsg) -> CouncilEnvelope {
+pub fn make_council_envelope(
+    sid: &str,
+    vid: Option<String>,
+    seq: u64,
+    msg: CouncilMsg,
+) -> CouncilEnvelope {
     let ts = now_ms();
     match msg {
         CouncilMsg::Verdict(v) => {
             let payload = serde_json::to_value(v).unwrap_or_else(|_| serde_json::json!({}));
-            CouncilEnvelope { seq, msg_type: CouncilMsgType::Verdict, ts_ms: ts, sid: sid.to_string(), vid, payload }
+            CouncilEnvelope {
+                seq,
+                msg_type: CouncilMsgType::Verdict,
+                ts_ms: ts,
+                sid: sid.to_string(),
+                vid,
+                payload,
+            }
         }
         CouncilMsg::AppealState(s) => {
             let payload = serde_json::to_value(s).unwrap_or_else(|_| serde_json::json!({}));
-            CouncilEnvelope { seq, msg_type: CouncilMsgType::AppealState, ts_ms: ts, sid: sid.to_string(), vid, payload }
+            CouncilEnvelope {
+                seq,
+                msg_type: CouncilMsgType::AppealState,
+                ts_ms: ts,
+                sid: sid.to_string(),
+                vid,
+                payload,
+            }
         }
         CouncilMsg::Interrupt(i) => {
             let payload = serde_json::to_value(i).unwrap_or_else(|_| serde_json::json!({}));
-            CouncilEnvelope { seq, msg_type: CouncilMsgType::Interrupt, ts_ms: ts, sid: sid.to_string(), vid, payload }
+            CouncilEnvelope {
+                seq,
+                msg_type: CouncilMsgType::Interrupt,
+                ts_ms: ts,
+                sid: sid.to_string(),
+                vid,
+                payload,
+            }
         }
-        CouncilMsg::Notice(n) => {
-            CouncilEnvelope { seq, msg_type: CouncilMsgType::SentinelNotice, ts_ms: ts, sid: sid.to_string(), vid, payload: n }
-        }
+        CouncilMsg::Notice(n) => CouncilEnvelope {
+            seq,
+            msg_type: CouncilMsgType::SentinelNotice,
+            ts_ms: ts,
+            sid: sid.to_string(),
+            vid,
+            payload: n,
+        },
     }
 }
 
@@ -278,5 +331,8 @@ pub enum CouncilClientMsg {
 }
 
 pub fn now_ms() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64
 }

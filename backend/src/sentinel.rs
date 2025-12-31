@@ -16,7 +16,13 @@ pub fn sentinel_evaluate(text: &str) -> SentinelDecision {
     let s = text.to_lowercase();
 
     // explicit summons (avoid overly broad tokens like plain "evaluate")
-    let summons = ["sentinel", "enforce", "evaluate risk", "is this allowed", "is this safe"];
+    let summons = [
+        "sentinel",
+        "enforce",
+        "evaluate risk",
+        "is this allowed",
+        "is this safe",
+    ];
     for p in &summons {
         if s.contains(p) {
             return SentinelDecision::RequireConsent("explicit sentinel summon".to_string());
@@ -24,7 +30,16 @@ pub fn sentinel_evaluate(text: &str) -> SentinelDecision {
     }
 
     // high-risk deny tokens
-    let deny_tokens = ["suicide", "self-harm", "kill ", "weapon", "bomb", "poison", "explode", "harm others"];
+    let deny_tokens = [
+        "suicide",
+        "self-harm",
+        "kill ",
+        "weapon",
+        "bomb",
+        "poison",
+        "explode",
+        "harm others",
+    ];
     for t in &deny_tokens {
         if s.contains(t) {
             return SentinelDecision::Deny(format!("prohibited high-risk content detected: {}", t));
@@ -33,9 +48,24 @@ pub fn sentinel_evaluate(text: &str) -> SentinelDecision {
 
     // domain triggers that require consent/warning
     let consent_tokens = [
-        "law", "legal", "liability", "compliance", "ethic", "ethics", "safety", "secure",
-        "security", "exploit", "vulnerability", "delete ", "erase ", "publish", "release", "sovereign",
-        "act for", "act on behalf",
+        "law",
+        "legal",
+        "liability",
+        "compliance",
+        "ethic",
+        "ethics",
+        "safety",
+        "secure",
+        "security",
+        "exploit",
+        "vulnerability",
+        "delete ",
+        "erase ",
+        "publish",
+        "release",
+        "sovereign",
+        "act for",
+        "act on behalf",
     ];
     for t in &consent_tokens {
         if s.contains(t) {
@@ -79,7 +109,10 @@ pub async fn sentinel_speak(ollama_url: &str, model: &str, system: &str) -> anyh
         model,
         prompt: system,
         stream: false,
-        options: Some(OReqOptions { num_ctx: Some(512), temperature: Some(0.0) }),
+        options: Some(OReqOptions {
+            num_ctx: Some(512),
+            temperature: Some(0.0),
+        }),
     };
 
     let res = client
@@ -119,11 +152,31 @@ mod tests {
     #[test]
     fn table_driven_sentinel_evaluate() {
         let cases = vec![
-            Case { input: "Can you evaluate the legal liability here?", expect_variant: "RequireConsent", expect_reason_sub: "legal" },
-            Case { input: "Sentinel, evaluate risk", expect_variant: "RequireConsent", expect_reason_sub: "explicit sentinel summon" },
-            Case { input: "How to make a bomb", expect_variant: "Deny", expect_reason_sub: "prohibited" },
-            Case { input: "This is risky and possibly irreversible", expect_variant: "AllowWithWarning", expect_reason_sub: "flag" },
-            Case { input: "Hello, small talk only", expect_variant: "Allow", expect_reason_sub: "" },
+            Case {
+                input: "Can you evaluate the legal liability here?",
+                expect_variant: "RequireConsent",
+                expect_reason_sub: "legal",
+            },
+            Case {
+                input: "Sentinel, evaluate risk",
+                expect_variant: "RequireConsent",
+                expect_reason_sub: "explicit sentinel summon",
+            },
+            Case {
+                input: "How to make a bomb",
+                expect_variant: "Deny",
+                expect_reason_sub: "prohibited",
+            },
+            Case {
+                input: "This is risky and possibly irreversible",
+                expect_variant: "AllowWithWarning",
+                expect_reason_sub: "flag",
+            },
+            Case {
+                input: "Hello, small talk only",
+                expect_variant: "Allow",
+                expect_reason_sub: "",
+            },
         ];
 
         for c in cases {
@@ -131,16 +184,34 @@ mod tests {
             match (res, c.expect_variant) {
                 (SentinelDecision::Allow, "Allow") => { /* ok */ }
                 (SentinelDecision::AllowWithWarning(s), "AllowWithWarning") => {
-                    assert!(s.contains(c.expect_reason_sub), "expected reason substring '{}' in '{}'", c.expect_reason_sub, s);
+                    assert!(
+                        s.contains(c.expect_reason_sub),
+                        "expected reason substring '{}' in '{}'",
+                        c.expect_reason_sub,
+                        s
+                    );
                 }
                 (SentinelDecision::RequireConsent(s), "RequireConsent") => {
-                    assert!(s.contains(c.expect_reason_sub), "expected reason substring '{}' in '{}'", c.expect_reason_sub, s);
+                    assert!(
+                        s.contains(c.expect_reason_sub),
+                        "expected reason substring '{}' in '{}'",
+                        c.expect_reason_sub,
+                        s
+                    );
                 }
                 (SentinelDecision::Deny(s), "Deny") => {
-                    assert!(s.contains(c.expect_reason_sub), "expected reason substring '{}' in '{}'", c.expect_reason_sub, s);
+                    assert!(
+                        s.contains(c.expect_reason_sub),
+                        "expected reason substring '{}' in '{}'",
+                        c.expect_reason_sub,
+                        s
+                    );
                 }
                 (other, expect) => {
-                    panic!("case failed: input='{}' expected='{}' got='{:?}'", c.input, expect, other);
+                    panic!(
+                        "case failed: input='{}' expected='{}' got='{:?}'",
+                        c.input, expect, other
+                    );
                 }
             }
         }
