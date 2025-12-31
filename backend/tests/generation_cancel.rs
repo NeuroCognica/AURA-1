@@ -44,7 +44,7 @@ async fn generation_is_cancelled_on_blocking_council_msg() {
     assert!(first.is_ok(), "expected initial token before cancel");
 
     // Now broadcast a blocking council verdict that should cancel the generation
-    aura_backend::broadcast::broadcast_council(&store, &council_tx, "s1", "verdict", serde_json::json!({"final_state": "deny"}), Some(&gen_mgr));
+    aura_backend::broadcast::broadcast_council(&store, &council_tx, None, "s1", "verdict", serde_json::json!({"final_state": "deny"}), Some(&gen_mgr));
 
     // Wait for end envelope
     let got_end = tokio::time::timeout(Duration::from_secs(2), async {

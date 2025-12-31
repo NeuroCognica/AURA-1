@@ -231,6 +231,45 @@ pub struct CouncilEnvelope {
     pub payload: serde_json::Value,
 }
 
+/// Typed message payloads for council envelopes. This enum is the
+/// canonical typed representation; `make_council_envelope` converts
+/// it into the existing `CouncilEnvelope` struct (preserving the
+/// current serialized shape) so Pass 1 remains additive.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", content = "payload")]
+pub enum CouncilMsg {
+    Verdict(CouncilVerdict),
+    AppealState(AppealState),
+    Interrupt(InterruptPayload),
+    Notice(serde_json::Value),
+}
+
+/// Construct a `CouncilEnvelope` from typed pieces. `seq` is left to
+/// the caller (broadcast layer will assign sequencing in Pass 2). The
+/// function assigns `ts_ms` via `now_ms()` and serializes the typed
+/// payload into `payload: serde_json::Value` while mapping to the
+/// existing `CouncilMsgType` so the on-wire JSON remains unchanged.
+pub fn make_council_envelope(sid: &str, vid: Option<String>, seq: u64, msg: CouncilMsg) -> CouncilEnvelope {
+    let ts = now_ms();
+    match msg {
+        CouncilMsg::Verdict(v) => {
+            let payload = serde_json::to_value(v).unwrap_or_else(|_| serde_json::json!({}));
+            CouncilEnvelope { seq, msg_type: CouncilMsgType::Verdict, ts_ms: ts, sid: sid.to_string(), vid, payload }
+        }
+        CouncilMsg::AppealState(s) => {
+            let payload = serde_json::to_value(s).unwrap_or_else(|_| serde_json::json!({}));
+            CouncilEnvelope { seq, msg_type: CouncilMsgType::AppealState, ts_ms: ts, sid: sid.to_string(), vid, payload }
+        }
+        CouncilMsg::Interrupt(i) => {
+            let payload = serde_json::to_value(i).unwrap_or_else(|_| serde_json::json!({}));
+            CouncilEnvelope { seq, msg_type: CouncilMsgType::Interrupt, ts_ms: ts, sid: sid.to_string(), vid, payload }
+        }
+        CouncilMsg::Notice(n) => {
+            CouncilEnvelope { seq, msg_type: CouncilMsgType::SentinelNotice, ts_ms: ts, sid: sid.to_string(), vid, payload: n }
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "type")]
 pub enum CouncilClientMsg {

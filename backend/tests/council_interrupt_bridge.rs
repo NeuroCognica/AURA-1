@@ -28,7 +28,7 @@ fn council_interrupt_forwarding_minimal() {
     };
 
     // Serialize and persist via broadcast_council helper
-    aura_backend::broadcast::broadcast_council(&std::sync::Arc::new(store), &council_tx, "s123", "interrupt", interrupt_payload.clone(), None);
+    aura_backend::broadcast::broadcast_council(&std::sync::Arc::new(store), &council_tx, None, "s123", "interrupt", interrupt_payload.clone(), None);
 
     // council_rx should receive the raw stored JSON string
     let received = council_rx.try_recv().expect("council message received");

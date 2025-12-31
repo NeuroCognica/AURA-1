@@ -254,6 +254,70 @@ mod __storage_impl {
                 Ok(out)
             }
 
+                /// Append a typed council envelope atomically.
+                ///
+                /// This function computes a new per-session sequence number,
+                /// invokes the provided closure with that sequence to obtain
+                /// the serialized envelope bytes, and atomically writes the
+                /// envelope under the `logs` column family and updates the
+                /// session's last seq in the `state` column family.
+                pub fn append_council_envelope_with<F>(&self, session_id: &str, f: F) -> anyhow::Result<u64>
+                where
+                    F: FnOnce(u64) -> Vec<u8>,
+                {
+                    let mut batch = WriteBatch::default();
+
+                    let state_cf = self.cf_handle("state");
+                    let logs_cf = self.cf_handle("logs");
+
+                    // key for last seq for council for this session
+                    let last_key = format!("sess_council_last:{}", session_id);
+
+                    let last_seq = match self.db.get_cf(state_cf, last_key.as_bytes())? {
+                        Some(v) if v.len() == 8 => u64::from_be_bytes(v.as_slice().try_into().unwrap()),
+                        _ => 0u64,
+                    };
+
+                    let new_seq = last_seq + 1;
+
+                    // Let caller produce the serialized envelope bytes now that we have seq
+                    let ser = f(new_seq);
+
+                    // composite key: sess_council:{session_id}:{seq padded}
+                    let key = format!("sess_council:{}:{:020}", session_id, new_seq);
+
+                    batch.put_cf(logs_cf, key.as_bytes(), &ser);
+                    batch.put_cf(state_cf, last_key.as_bytes(), &new_seq.to_be_bytes());
+
+                    // commit batch
+                    self.db.write(batch)?;
+
+                    Ok(new_seq)
+                }
+
+                /// Retrieve a persisted council envelope for a given session and sequence.
+                pub fn get_council_envelope(&self, session_id: &str, seq: u64) -> anyhow::Result<Option<Vec<u8>>> {
+                    let logs_cf = self.cf_handle("logs");
+                    let key = format!("sess_council:{}:{:020}", session_id, seq);
+                    Ok(self.db.get_cf(logs_cf, key.as_bytes())?)
+                }
+
+                /// Load a range of persisted council envelopes (inclusive).
+                pub fn load_council_range(&self, session_id: &str, from_seq: u64, to_seq: u64) -> anyhow::Result<Vec<Vec<u8>>> {
+                    let mut out = Vec::new();
+                    let logs_cf = self.cf_handle("logs");
+                    for seq in from_seq..=to_seq {
+                        let key = format!("sess_council:{}:{:020}", session_id, seq);
+                        if let Some(v) = self.db.get_cf(logs_cf, key.as_bytes())? {
+                            out.push(v);
+                        } else {
+                            // missing envelope in range; stop early
+                            break;
+                        }
+                    }
+                    Ok(out)
+                }
+
                 /// Append a session metadata entry (append-only). Returns sequence number for the session.
                 pub fn append_session_meta(&self, session_id: &str, content: &str) -> anyhow::Result<u64> {
                     let mut batch = WriteBatch::default();

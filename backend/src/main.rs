@@ -63,6 +63,8 @@ async fn main() -> anyhow::Result<()> {
     let (voice_bcast_tx, _voice_bcast_rx) = tokio::sync::broadcast::channel::<String>(1024);
     let (ai_bcast_tx, _ai_bcast_rx) = tokio::sync::broadcast::channel::<String>(1024);
     let (council_bcast_tx, _council_bcast_rx) = tokio::sync::broadcast::channel::<String>(256);
+    // Typed council broadcast channel (migration path to typed transport)
+    let (council_bcast_typed_tx, _council_bcast_typed_rx) = tokio::sync::broadcast::channel::<crate::council_verdict::CouncilEnvelope>(256);
 
     // GenerationManager for cancellation / gen_id tracking
     let gen_mgr = std::sync::Arc::new(generation_manager_mod::GenerationManager::new());
@@ -300,6 +302,7 @@ async fn main() -> anyhow::Result<()> {
                     let store = store.clone();
                     let ai_bcast = ai_bcast_tx.clone();
                     let council_bcast = council_bcast_tx.clone();
+                    let council_bcast_typed = council_bcast_typed_tx.clone();
                     let gen_mgr = gen_mgr.clone();
                     move |Json(req): Json<crate::council_verdict::ConsentSubmitRequest>| {
                         let store = store.clone();
@@ -325,7 +328,7 @@ async fn main() -> anyhow::Result<()> {
                                             }
                                             // Persist and broadcast the new appeal state on the council channel
                                             let msg = crate::appeal::ws_msg_state(&req.session_id, &new_st);
-                                            crate::broadcast::broadcast_council(&store, &council_bcast, &req.session_id, "appeal_state", serde_json::to_value(&msg.payload).unwrap_or_else(|_| serde_json::json!({})), Some(&gen_mgr)); 
+                                            crate::broadcast::broadcast_council(&store, &council_bcast, Some(&council_bcast_typed), &req.session_id, "appeal_state", serde_json::to_value(&msg.payload).unwrap_or_else(|_| serde_json::json!({})), Some(&gen_mgr)); 
                                             let resp = serde_json::json!({"ok": true, "state": new_st});
                                             return (axum::http::StatusCode::OK, resp.to_string());
                                         }
@@ -406,6 +409,8 @@ async fn main() -> anyhow::Result<()> {
         .layer(Extension(voice_bcast_tx.clone()));
     let app = app.layer(Extension(ai_bcast_tx.clone()));
     let app = app.layer(Extension(council_bcast_tx.clone()));
+    // Expose the typed council broadcast channel so handlers can publish typed envelopes.
+    let app = app.layer(Extension(council_bcast_typed_tx.clone()));
     let app = app.layer(Extension(gen_mgr.clone()));
 
     // Serve static TTS/audio files from `backend/data/audio` at `/audio/{file...}`

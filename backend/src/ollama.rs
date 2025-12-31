@@ -268,6 +268,7 @@ async fn stream_ollama_chat_with_options(
     Extension(store): Extension<Arc<RocksStore>>,
     Extension(ai_bcast): Extension<broadcast::Sender<String>>,
     Extension(council_bcast): Extension<broadcast::Sender<String>>,
+    Extension(council_bcast_typed): Extension<broadcast::Sender<crate::council_verdict::CouncilEnvelope>>,
     Extension(gen_mgr): Extension<Arc<crate::generation_manager::GenerationManager>>,
     Json(req): Json<ChatRequest>,
 ) -> impl axum::response::IntoResponse {
@@ -362,7 +363,7 @@ async fn stream_ollama_chat_with_options(
             }
             let _ = ai_bcast.send(block.clone());
             // also persist and broadcast to council channel as a SentinelNotice
-            crate::broadcast::broadcast_council(&store, &council_bcast, &req.session_id, "sentinel_notice", serde_json::json!({"reason": reason, "level": "warning"}), Some(&gen_mgr));
+            crate::broadcast::broadcast_council(&store, &council_bcast, Some(&council_bcast_typed), &req.session_id, "sentinel_notice", serde_json::json!({"reason": reason, "level": "warning"}), Some(&gen_mgr));
             // continue to main generation
         }
         SentinelDecision::RequireConsent(reason) => {
@@ -374,7 +375,7 @@ async fn stream_ollama_chat_with_options(
                     let _ = store.append_chat_msg(&req.session_id, "sentinel", &block);
                     let _ = ai_bcast.send(block.clone());
                     // persist + broadcast council notice
-                    crate::broadcast::broadcast_council(&store, &council_bcast, &req.session_id, "sentinel_speech", serde_json::json!({"speech": block}), Some(&gen_mgr));
+                    crate::broadcast::broadcast_council(&store, &council_bcast, Some(&council_bcast_typed), &req.session_id, "sentinel_speech", serde_json::json!({"speech": block}), Some(&gen_mgr));
                     return (StatusCode::OK, block);
                 }
                 Err(e) => {
@@ -382,7 +383,7 @@ async fn stream_ollama_chat_with_options(
                     let block = format_sentinel_block(&reason, "REQUIRE_CONSENT");
                     let _ = store.append_chat_msg(&req.session_id, "sentinel", &block);
                     let _ = ai_bcast.send(block.clone());
-                    crate::broadcast::broadcast_council(&store, &council_bcast, &req.session_id, "sentinel_notice", serde_json::json!({"reason": reason, "level": "require_consent"}), Some(&gen_mgr));
+                    crate::broadcast::broadcast_council(&store, &council_bcast, Some(&council_bcast_typed), &req.session_id, "sentinel_notice", serde_json::json!({"reason": reason, "level": "require_consent"}), Some(&gen_mgr));
                     return (StatusCode::OK, block);
                 }
             }
@@ -391,7 +392,7 @@ async fn stream_ollama_chat_with_options(
             let block = format_sentinel_block(&reason, "DENY");
             let _ = store.append_chat_msg(&req.session_id, "sentinel", &block);
             let _ = ai_bcast.send(block.clone());
-            crate::broadcast::broadcast_council(&store, &council_bcast, &req.session_id, "verdict", serde_json::json!({"final_state": "deny", "reason": reason}), Some(&gen_mgr));
+            crate::broadcast::broadcast_council(&store, &council_bcast, Some(&council_bcast_typed), &req.session_id, "verdict", serde_json::json!({"final_state": "deny", "reason": reason}), Some(&gen_mgr));
             return (StatusCode::FORBIDDEN, block);
         }
     }
