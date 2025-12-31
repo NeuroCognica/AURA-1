@@ -1,0 +1,43 @@
+Phase 1: Hard Reset File Structure
+
+Open main.rs
+Delete all contents.
+Add only the top-level imports and an empty main function.
+Confirm the file compiles (no handlers yet).
+Phase 2: Add Canonical Imports and Event Store Boot
+
+At the top, add all required imports:
+actix_web: get, post, web, App, HttpResponse, HttpServer, Responder
+std::sync::Mutex
+std::panic
+sentinel_store::FileEventStore
+chrono, uuid, serde_json, etc. (as needed for handlers)
+In main, open the event store and start Actix server (no handlers yet).
+Phase 3: Add Health Handler
+
+Implement the /health handler.
+Register it in the Actix App.
+Confirm compilation and basic endpoint works.
+Phase 4: Add Authz Handler (Envelope, Identity, Signature, Nonce)
+
+Implement /authz handler.
+Ensure envelope variable is used, not env.
+Load identity state fresh in handler.
+Register handler in App.
+Phase 5: Add Challenge, Login, Logout, Whoami, Genesis Handlers
+
+Implement each handler, one at a time.
+Each handler loads identity state fresh.
+All handlers return HttpResponse.
+Register each handler in App.
+Phase 6: Finalize Main Function
+
+Ensure main function registers all handlers.
+Ensure all imports are present and correct.
+Confirm compilation and run basic tests.
+Phase 7: Clean Up Warnings
+
+Remove unused imports.
+Prefix intentionally-unused variables with _.
+Confirm build is warning-free.
+Let me know when you’re ready to begin Phase 1, and I’ll provide the exact code for that step.

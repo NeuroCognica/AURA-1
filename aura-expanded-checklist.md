@@ -43,14 +43,14 @@
 	* [x] Configure cargo cache for faster builds
 * [x] Add test matrix for feature combinations
 	* [x] Test with `persistence` feature enabled
-	* [ ] Test with `persistence` feature disabled
+	* [x] Test with `persistence` feature disabled
 	* [x] Test with `search` feature enabled
-	* [ ] Test with `search` feature disabled
+	* [x] Test with `search` feature disabled
 * [ ] Configure test execution
-	* [ ] Run `cargo test --all-features`
-	* [ ] Run `cargo test --no-default-features`
-	* [ ] Explicitly run `ws_replay_integration` test
-	* [ ] Run `council_envelope_serde` deterministic tests
+	* [x] Run `cargo test --all-features`
+	* [x] Run `cargo test --no-default-features`
+	* [x] Explicitly run `ws_replay_integration` test
+	* [x] Run `council_envelope_serde` deterministic tests
 * [ ] Add build verification
 	* [ ] Run `cargo build --release --all-features`
 	* [ ] Run `cargo clippy -- -D warnings`

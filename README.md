@@ -3,6 +3,8 @@ AURA-1
 
 Backend-authoritative Rust workspace with a stubbed Three.js frontend target.
 
+[![Authority CI](https://github.com/NeuroCognica/AURA-1/actions/workflows/authority-spine-ci.yml/badge.svg)](https://github.com/NeuroCognica/AURA-1/actions/workflows/authority-spine-ci.yml)
+
 Primary stacks
 - Backend (authority): Rust, Axum/Tokio, optional RocksDB/MMR/Tantivy (gated by features).
 - Frontend (client-only): TypeScript/JavaScript, Three.js target (stubbed build).
@@ -123,6 +125,12 @@ Contribution & coding guidelines
 
 Where to go next
 - See `aura1.md` for the architecture report and `STATUS_REPORT.md` for operational run instructions and sensor wiring.
+
+CI guarantees
+- **CI coverage:** The repository enforces integration tests for the replay semantics and persistence on pushes to `main` via GitHub Actions.
+- **Windows persistence checks:** The CI matrix includes Windows persistence runs; failures should be investigated via the workflow logs and reproduced locally.
+
+If you modify persistence or replay code, add tests and ensure the `ws_replay_integration` test remains green in CI.
 
 ```
 - RocksDB + MMR scaffold (feature `persistence`):

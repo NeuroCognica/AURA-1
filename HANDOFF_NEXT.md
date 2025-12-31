@@ -1,3 +1,62 @@
+# Handoff — Next Actions
+
+This file summarizes the remaining tasks left in the workspace and concise next steps for whoever picks this up.
+
+Remaining Todos
+
+- `Create annotated tag and push (aura-1-authority-spine-v1)`
+	- Next step: create an annotated tag on the authoritative commit and push: `git tag -a aura-1-authority-spine-v1 -m "AURA-1 authority spine v1"` then `git push origin --tags`.
+
+- `Draft GitHub release from tag`
+	- Next step: Open a draft release in GitHub using `RELEASE_NOTES/release_body_aura-1-authority-spine-v1.md` as the body and mark as prerelease if desired.
+
+- `Add CI status badge to README.md`
+	- Next step: add the Actions badge for the `authority-spine-ci.yml` workflow to the README and commit.
+
+- `Document CI as constitutional requirement in README`
+	- Next step: add a short section describing the CI guarantees and links to the workflow file.
+
+- `Verify CI runs successfully on main`
+	- Next step: monitor GitHub Actions after merge/push to `main`; fix any failing matrix jobs (notably Windows persistence jobs).
+
+- `Investigate failing Windows persistence checks`
+	- Next step: inspect failing workflow run logs for the Windows jobs, rerun failing jobs if transient, and reproduce locally if needed. Start by viewing the failing run in Actions and copying the log for `persistence` on Windows.
+
+- `Scaffold Electron Workbench (UI + IPC)` — status: in-progress
+	- Current: `workbench/` scaffold created with Vite + React + Tailwind + Electron IPC stubs.
+	- Next step: finish UI polish if desired; ensure `workbench/package.json` scripts are correct.
+
+- `Start Electron dev`
+	- Next step: from `C:\AURA-1\workbench` run `npm run electron:dev`. If Electron complains about missing `VITE_DEV_SERVER_URL` or `default_app.asar`, run `npm run dev` and verify the renderer at `http://localhost:5173` first, then re-run the electron script.
+
+Notes and context
+
+- I updated `.gitignore` to include `/workbench/` and `/node_modules/` and removed tracked dependency files from the index (no dependency files committed). The `.gitignore` change was already present in the branch; no new commit was required.
+- I resolved the `npm install` dependency issues and marked `Fix workbench npm install` done.
+- The Phase‑1 CI changes and PR are on branch `feature/ci-authority-spine` (PR exists). Two Windows persistence jobs previously failed in Actions; these need investigation.
+
+Quick commands
+
+```powershell
+# From repo root
+git checkout feature/ci-authority-spine
+# Tag and push
+git tag -a aura-1-authority-spine-v1 -m "AURA-1 authority spine v1"
+git push origin --tags
+
+# Workbench dev (in separate terminal)
+cd C:\AURA-1\workbench
+npm run dev          # verify renderer
+npm run electron:dev # start electron after renderer is up
+```
+
+Where to look
+
+- Backend: `backend/` (authority) — continue here for persistence fixes and tests.
+- Workbench: `workbench/` — UI and Electron dev.
+- CI: `.github/workflows/authority-spine-ci.yml` — check matrix and Windows jobs.
+
+If you want I can: commit & push the tag and draft release, or start the Electron dev run and capture logs. Tell me which to do next.
 Handoff report — next chat instance
 Date: 2025-12-31
 
