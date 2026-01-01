@@ -1,0 +1,20 @@
+[package]
+name = "aura-orchestrator"
+version = "0.1.0"
+edition = "2021"
+description = "Orchestrator crate: routes intents and coordinates archetypes (scaffold)"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+aura-backend = { path = ".." }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+thiserror = "1.0"
+async-trait = "0.1"
+tokio = { workspace = true }
+uuid = { version = "1", features = ["v4", "serde"] }
+
+[lib]
+name = "orchestrator"
+path = "src/lib.rs"
