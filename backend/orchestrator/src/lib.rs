@@ -3,6 +3,7 @@ pub mod router;
 pub mod verdict_loop;
 pub mod architect;
 pub mod deliberation;
+pub mod config;
 
 use aura_backend::council_verdict::*;
 use serde::{Deserialize, Serialize};
@@ -32,3 +33,4 @@ pub fn make_proposed_action(action_id: &str, title: &str, description: Option<&s
 
 pub use architect::*;
 pub use deliberation::*;
+pub use config::*;

@@ -1,0 +1,43 @@
+{
+  "llm": {
+    "endpoint": "http://localhost:11434"
+  },
+  "archetypes": {
+    "Sentinel": {
+      "model": "llama3:8b",
+      "temperature": 0.0,
+      "top_p": 0.1
+    },
+    "Architect": {
+      "model": "mistral:7b-instruct",
+      "temperature": 0.2,
+      "top_p": 0.9
+    },
+    "Explorer": {
+      "model": "mistral:7b-instruct",
+      "temperature": 0.3,
+      "top_p": 0.95
+    },
+    "Oracle": {
+      "model": "llama3:8b",
+      "temperature": 0.0,
+      "top_p": 0.2
+    },
+    "Mentor": {
+      "model": "mistral:7b-instruct",
+      "temperature": 0.4,
+      "top_p": 0.9
+    },
+    "Empath": {
+      "model": "mistral:7b-instruct",
+      "temperature": 0.6,
+      "top_p": 0.95
+    },
+    "Jester": {
+      "model": "mistral:7b-instruct",
+      "temperature": 0.8,
+      "top_p": 0.95
+    }
+  }
+}
+
