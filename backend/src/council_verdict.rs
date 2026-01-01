@@ -1,16 +1,23 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+#[cfg(feature = "schema-export")]
+use schemars::JsonSchema;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "schema-export", derive(JsonSchema))]
 pub struct SessionId(pub String);
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "schema-export", derive(JsonSchema))]
 pub struct VerdictId(pub String);
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "schema-export", derive(JsonSchema))]
 pub struct ArchetypeId(pub String);
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "schema-export", derive(JsonSchema))]
 pub enum Capability {
     Code,
     Planning,
@@ -19,6 +26,7 @@ pub enum Capability {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "schema-export", derive(JsonSchema))]
 pub enum SentinelDecisionKind {
     Allow,
     AllowWithWarning,
@@ -27,6 +35,7 @@ pub enum SentinelDecisionKind {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "schema-export", derive(JsonSchema))]
 pub enum Severity {
     Low,
     Elevated,
@@ -34,6 +43,7 @@ pub enum Severity {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "schema-export", derive(JsonSchema))]
 pub enum SentinelDomain {
     Safety,
     Security,
@@ -45,6 +55,7 @@ pub enum SentinelDomain {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "schema-export", derive(JsonSchema))]
 pub struct SentinelConstraint {
     pub domain: SentinelDomain,
     pub severity: Severity,
@@ -53,6 +64,7 @@ pub struct SentinelConstraint {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "schema-export", derive(JsonSchema))]
 pub enum OverrideScope {
     RequestOnly { request_hash: String },
     ActionClass { class: String },
@@ -60,6 +72,7 @@ pub enum OverrideScope {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "schema-export", derive(JsonSchema))]
 pub struct ConsentRequirement {
     pub exact_phrase: String,
     pub scope: OverrideScope,
@@ -68,6 +81,7 @@ pub struct ConsentRequirement {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "schema-export", derive(JsonSchema))]
 pub enum FinalState {
     Allowed,
     AllowedWithWarning,
@@ -77,6 +91,7 @@ pub enum FinalState {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "schema-export", derive(JsonSchema))]
 pub enum NextRequired {
     None,
     ProvideConsent {
@@ -96,6 +111,7 @@ pub enum NextRequired {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "schema-export", derive(JsonSchema))]
 pub struct AlchemistOption {
     pub option_id: String,
     pub title: String,
@@ -105,6 +121,7 @@ pub struct AlchemistOption {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "schema-export", derive(JsonSchema))]
 pub struct CouncilVerdict {
     pub verdict_id: VerdictId,
     pub session_id: SessionId,
@@ -127,6 +144,7 @@ pub struct CouncilVerdict {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "schema-export", derive(JsonSchema))]
 pub struct OverrideToken {
     pub token_id: String,
     pub scope: OverrideScope,
@@ -135,6 +153,7 @@ pub struct OverrideToken {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "schema-export", derive(JsonSchema))]
 pub enum AppealState {
     Idle,
     AwaitingUser {
@@ -192,6 +211,7 @@ pub struct CouncilWsMsg {
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema-export", derive(JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum CouncilMsgType {
     Verdict,
@@ -205,6 +225,7 @@ pub enum CouncilMsgType {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema-export", derive(JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum InterruptKind {
     HaltLanguage,
@@ -214,6 +235,7 @@ pub enum InterruptKind {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema-export", derive(JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum InterruptScope {
     Session,
@@ -223,6 +245,7 @@ pub enum InterruptScope {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema-export", derive(JsonSchema))]
 pub struct InterruptRequirements {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub exact_phrase: Option<String>,
@@ -233,6 +256,7 @@ pub struct InterruptRequirements {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema-export", derive(JsonSchema))]
 pub struct InterruptPayload {
     pub kind: InterruptKind,
     pub scope: InterruptScope,
@@ -244,6 +268,7 @@ pub struct InterruptPayload {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema-export", derive(JsonSchema))]
 pub struct CouncilEnvelope {
     pub seq: u64,
     #[serde(rename = "type")]
@@ -258,6 +283,7 @@ pub struct CouncilEnvelope {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema-export", derive(JsonSchema))]
 pub struct ProposedAction {
     pub action_id: String,
     pub title: String,
@@ -268,6 +294,7 @@ pub struct ProposedAction {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema-export", derive(JsonSchema))]
 pub struct SubTask {
     pub parent_action_id: Option<String>,
     pub task_id: String,
@@ -276,6 +303,7 @@ pub struct SubTask {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema-export", derive(JsonSchema))]
 pub struct Deliberation {
     pub deliberation_id: String,
     pub summary: String,
@@ -283,6 +311,7 @@ pub struct Deliberation {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema-export", derive(JsonSchema))]
 pub struct Decision {
     pub deliberation_id: String,
     pub decision: String,
@@ -294,6 +323,7 @@ pub struct Decision {
 /// it into the existing `CouncilEnvelope` struct (preserving the
 /// current serialized shape) so Pass 1 remains additive.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema-export", derive(JsonSchema))]
 #[serde(tag = "type", content = "payload")]
 pub enum CouncilMsg {
     Verdict(CouncilVerdict),

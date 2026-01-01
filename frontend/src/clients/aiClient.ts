@@ -69,6 +69,25 @@ export class AiClient {
       return;
     }
 
+    // Support backend envelope: { type: "delta", payload: "<inner JSON string>" }
+    if (msg.type === "delta" && typeof msg.payload === "string") {
+      try {
+        const inner = JSON.parse(msg.payload);
+        if (inner.type === "token" && typeof inner.payload === "string") {
+          this.tokenRenderer.handleToken(inner.payload);
+          return;
+        }
+        // older variants: { type: "token", payload: "..." }
+        if (inner.type === "token" && typeof inner.text === "string") {
+          this.tokenRenderer.handleToken(inner.text);
+          return;
+        }
+      } catch {
+        // fallthrough
+      }
+    }
+
+    // Backwards-compatible top-level token
     if (msg.type === "token" && typeof msg.payload === "string") {
       this.tokenRenderer.handleToken(msg.payload);
       return;

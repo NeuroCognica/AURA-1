@@ -1,4 +1,5 @@
 pub mod intent_classifier;
+pub mod intent_stratification;
 pub mod router;
 pub mod verdict_loop;
 pub mod architect;
@@ -6,6 +7,9 @@ pub mod deliberation;
 pub mod config;
 pub mod execution;
 pub mod llm;
+pub mod prompts;
+pub mod constitutional;
+pub mod qsic;
 
 use aura_backend::council_verdict::*;
 use serde::{Deserialize, Serialize};

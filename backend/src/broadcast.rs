@@ -393,6 +393,7 @@ async fn handle_ai_socket(
     let mut council_rx = council_bcast.subscribe();
     // Simple sequencing: attach a monotonically increasing seq to outgoing deltas.
     let mut seq: u64 = 0;
+    let mut logged_shape: bool = false;
     loop {
         tokio::select! {
             biased;
@@ -400,6 +401,20 @@ async fn handle_ai_socket(
                 match recv {
                     Ok(delta) => {
                         seq = seq.wrapping_add(1);
+                        // One-time inspect of payload shape to ensure clients can parse tokens.
+                        if !logged_shape {
+                            if let Ok(inner) = serde_json::from_str::<serde_json::Value>(&delta) {
+                                // Expect inner to be an object with 'type' and either 'payload' or 'content' and ideally 'gen_id'
+                                let has_type = inner.get("type").is_some();
+                                let has_gen = inner.get("gen_id").is_some() || inner.get("payload").and_then(|p| p.get("gen_id")).is_some();
+                                let has_token = inner.get("payload").is_some() || inner.get("content").is_some() || inner.get("text").is_some();
+                                tracing::info!(has_type, has_gen, has_token, "ai delta payload shape check: {}", inner);
+                            } else {
+                                tracing::info!("ai delta payload not JSON string: {}", delta);
+                            }
+                            logged_shape = true;
+                        }
+
                         let envelope = serde_json::json!({"seq": seq, "type": "delta", "payload": delta});
                         let s = envelope.to_string();
                         if socket.send(Message::Text(s)).await.is_err() {

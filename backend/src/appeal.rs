@@ -1,5 +1,5 @@
 use crate::council_verdict::*;
-use aura_backend::storage::RocksStore;
+use crate::storage::{Storage, RocksStore};
 use serde_json::json;
 use thiserror::Error;
 
@@ -31,7 +31,7 @@ fn k_verdict(sid: &str, vid: &str) -> String {
     format!("session:{}:verdict:{}", sid, vid)
 }
 
-pub fn load_appeal_state(store: &RocksStore, sid: &str) -> Result<AppealState, AppealError> {
+pub fn load_appeal_state(store: &dyn Storage, sid: &str) -> Result<AppealState, AppealError> {
     match store
         .get_bytes(k_state(sid).as_bytes())
         .map_err(|e| AppealError::Storage(e.to_string()))?
@@ -65,7 +65,7 @@ pub fn save_verdict(store: &RocksStore, sid: &str, v: &CouncilVerdict) -> Result
 }
 
 pub fn load_verdict(
-    store: &RocksStore,
+    store: &dyn Storage,
     sid: &str,
     vid: &str,
 ) -> Result<CouncilVerdict, AppealError> {

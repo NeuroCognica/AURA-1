@@ -5,14 +5,18 @@ use orchestrator::execution::registry::AdapterRegistry;
 use orchestrator::execution::types::AdapterInput;
 use orchestrator::execution::types::ArchetypeId;
 use orchestrator::llm::LLMClient;
-use orchestrator::llm::LLMResponse;
-use orchestrator::llm::LLMRequest;
+use orchestrator::llm::{LLMResponse, GenerationParams};
 
 struct FakeLlm { resp: String }
 
 #[async_trait::async_trait]
 impl LLMClient for FakeLlm {
-    async fn generate(&self, _req: LLMRequest) -> Result<LLMResponse, String> {
+    async fn generate(
+        &self,
+        _system_prompt: &str,
+        _user_prompt: &str,
+        _params: &GenerationParams,
+    ) -> Result<LLMResponse, String> {
         Ok(LLMResponse { text: self.resp.clone() })
     }
 }

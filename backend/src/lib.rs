@@ -1,9 +1,16 @@
 #![allow(dead_code)]
 
 pub mod storage;
+pub mod intent_stratification;
 
 #[cfg(feature = "persistence")]
 pub mod rocksdb_store;
+
+#[cfg(feature = "persistence")]
+pub mod accounts;
+
+#[cfg(feature = "persistence")]
+pub mod profile;
 
 #[cfg(feature = "search")]
 pub mod search;

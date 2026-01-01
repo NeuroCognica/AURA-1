@@ -20,8 +20,8 @@ export const App: React.FC = () => {
 
   // create clients
   useEffect(() => {
-    const council = new CouncilClient({ url: "ws://localhost/ws/council", store });
-    const ai = new AiClient({ url: "ws://localhost/ws/ai", tokenRenderer: { handleToken: (t) => tokenHandler(t) } });
+    const council = new CouncilClient({ url: "ws://127.0.0.1:8080/ws/council", store });
+    const ai = new AiClient({ url: "ws://127.0.0.1:8080/ws/ai", tokenRenderer: { handleToken: (t) => tokenHandler(t) } });
 
     council.connect();
     ai.connect();

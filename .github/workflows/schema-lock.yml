@@ -1,0 +1,45 @@
+name: Schema Authority Lock
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["main", "development"]
+
+jobs:
+  schema-lock:
+    runs-on: ubuntu-latest
+    name: Validate Schema Authority
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      
+      - name: Install jsonschema
+        run: pip install jsonschema
+      
+      - name: Setup Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+      
+      - name: Build schema_dump binary
+        run: cargo build --bin schema_dump --release --features schema-export
+        working-directory: ./backend
+      
+      - name: Run Schema Lock Validator
+        run: python tools/schema_lock.py
+      
+      - name: Upload schema artifacts (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: schema-drift-report
+          path: |
+            schemas/
+            target/release/schema_dump

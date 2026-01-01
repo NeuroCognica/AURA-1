@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::collections::BTreeMap;
 
-use orchestrator::llm::{LLMClient, LLMResponse, LLMRequest};
+use orchestrator::llm::{LLMClient, LLMResponse, GenerationParams};
 use orchestrator::execution::adapters::technician::TechnicianLlmAdapter;
 use orchestrator::execution::types::{AdapterInput, AdapterOutput, ArchetypeId, ProposedAction, RiskLevel};
 use orchestrator::execution::adapters::AdapterError;
@@ -13,7 +13,12 @@ struct FakeLlm {
 
 #[async_trait::async_trait]
 impl LLMClient for FakeLlm {
-    async fn generate(&self, _req: LLMRequest) -> Result<LLMResponse, String> {
+    async fn generate(
+        &self,
+        _system_prompt: &str,
+        _user_prompt: &str,
+        _params: &GenerationParams,
+    ) -> Result<LLMResponse, String> {
         Ok(LLMResponse { text: self.resp.clone() })
     }
 }

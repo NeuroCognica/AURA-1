@@ -17,7 +17,6 @@ use tokio::net::TcpListener;
 use tokio::sync::{mpsc, watch, Notify};
 use tracing::{info, warn};
 
-use aura_backend::storage;
 
 mod telemetry;
 use crate::telemetry::Pose;
@@ -25,10 +24,18 @@ mod broadcast;
 use crate::broadcast as broadcast_mod;
 mod appeal;
 mod council_verdict;
+mod storage;
+mod intent_stratification;
+mod archetype_api;
 mod generation_manager;
+mod chat_api;
 #[cfg(feature = "persistence")]
 mod ollama;
 mod sentinel;
+#[cfg(feature = "persistence")]
+mod accounts;
+#[cfg(feature = "persistence")]
+mod accounts_api;
 use crate::generation_manager as generation_manager_mod;
 
 #[tokio::main]
@@ -67,7 +74,7 @@ async fn main() -> anyhow::Result<()> {
     let (council_bcast_tx, _council_bcast_rx) = tokio::sync::broadcast::channel::<String>(256);
     // Typed council broadcast channel (migration path to typed transport)
     let (council_bcast_typed_tx, _council_bcast_typed_rx) =
-        tokio::sync::broadcast::channel::<aura_backend::council_verdict::CouncilEnvelope>(256);
+        tokio::sync::broadcast::channel::<crate::council_verdict::CouncilEnvelope>(256);
 
     // GenerationManager for cancellation / gen_id tracking
     let gen_mgr = std::sync::Arc::new(generation_manager_mod::GenerationManager::new());
@@ -185,7 +192,16 @@ async fn main() -> anyhow::Result<()> {
         .route("/ws/pose", get(broadcast_mod::ws_pose_client))
         .route("/ws/voice", get(broadcast_mod::ws_voice_client))
         .route("/ws/ai", get(broadcast_mod::ws_ai_handler))
-        .route("/ws/council", get(broadcast_mod::ws_council_handler))
+        .route("/ws/council", get(broadcast_mod::ws_council_handler));
+    
+    // Account management endpoints (offline login system)
+    #[cfg(feature = "persistence")]
+    let app = app
+        .route("/api/account/create", post(accounts_api::create_account_handler))
+        .route("/api/account/login", post(accounts_api::login_handler))
+        .route("/api/account/:username", get(accounts_api::get_account_handler));
+    
+    let app = app
         .route(
             "/api/archetypes",
             get({
@@ -271,7 +287,7 @@ async fn main() -> anyhow::Result<()> {
                     let council = council.clone();
                     let council_typed = council_typed.clone();
                     async move {
-                        aura_backend::archetype_api::activate_archetype_handler(
+                        crate::archetype_api::activate_archetype_handler(
                             axum::Json(payload),
                             axum::Extension(arche),
                             axum::Extension(council),
@@ -359,7 +375,7 @@ async fn main() -> anyhow::Result<()> {
                     }
                 }
             }))
-            .route("/api/chat", axum::routing::post(crate::ollama::chat_handler))
+                .route("/api/chat", axum::routing::post(crate::chat_api::chat_handler))
                 .route("/api/appeal", axum::routing::post({
                     let store = store.clone();
                     move |Json(payload): Json<crate::appeal::AppealRequest>| {
@@ -386,10 +402,10 @@ async fn main() -> anyhow::Result<()> {
                         let gen_mgr = gen_mgr.clone();
                         async move {
                             // load verdict
-                            match crate::appeal::load_verdict(&store, &req.session_id, &req.verdict_id) {
+                            match crate::appeal::load_verdict(&*store, &req.session_id, &req.verdict_id) {
                                 Ok(v) => {
                                     // load current state
-                                    let st = match crate::appeal::load_appeal_state(&store, &req.session_id) {
+                                        let st = match crate::appeal::load_appeal_state(&*store, &req.session_id) {
                                         Ok(s) => s,
                                         Err(e) => return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, format!("error: {}", e)),
                                     };
@@ -398,7 +414,7 @@ async fn main() -> anyhow::Result<()> {
                                     match crate::appeal::submit_consent(&st, &v, &req.phrase, now_ms) {
                                         Ok(new_st) => {
                                             // persist and broadcast state
-                                            if let Err(e) = crate::appeal::save_appeal_state(&store, &req.session_id, &new_st) {
+                                            if let Err(e) = crate::appeal::save_appeal_state(&*store, &req.session_id, &new_st) {
                                                 return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, format!("save error: {}", e));
                                             }
                                             // Persist and broadcast the new appeal state on the council channel
@@ -562,15 +578,19 @@ async fn main() -> anyhow::Result<()> {
 
         if cert_path.exists() && key_path.exists() {
             info!("starting AURA-1 backend with TLS");
+            info!("AURA backend starting -- binding HTTP server");
             let config = RustlsConfig::from_pem_file(cert_path, key_path).await?;
             let addr: SocketAddr = "0.0.0.0:8443".parse()?;
+            info!("AURA backend listening on {}", addr);
             axum_server::bind_rustls(addr, config)
                 .serve(app.into_make_service_with_connect_info::<SocketAddr>())
                 .await?;
         } else {
             let addr: SocketAddr = "0.0.0.0:8080".parse()?;
             info!("TLS certs not found; starting plain HTTP on {addr}");
+            info!("AURA backend starting -- binding HTTP server");
             let listener = TcpListener::bind(addr).await?;
+            info!("AURA backend listening on {}", addr);
             axum::serve(
                 listener,
                 app.into_make_service_with_connect_info::<SocketAddr>(),
@@ -583,8 +603,10 @@ async fn main() -> anyhow::Result<()> {
     {
         let addr: SocketAddr = "0.0.0.0:8080".parse()?;
         info!("starting AURA-1 backend on {addr}");
+        info!("AURA backend starting -- binding HTTP server");
 
         let listener = TcpListener::bind(addr).await?;
+        info!("AURA backend listening on {}", addr);
         axum::serve(
             listener,
             app.into_make_service_with_connect_info::<SocketAddr>(),

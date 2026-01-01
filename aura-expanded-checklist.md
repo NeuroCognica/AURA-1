@@ -51,17 +51,17 @@
 	* [x] Run `cargo test --no-default-features`
 	* [x] Explicitly run `ws_replay_integration` test
 	* [x] Run `council_envelope_serde` deterministic tests
-* [ ] Add build verification
-	* [ ] Run `cargo build --release --all-features`
-	* [ ] Run `cargo clippy -- -D warnings`
-	* [ ] Run `cargo fmt -- --check`
-* [ ] Configure failure conditions
-	* [ ] Fail on any test failure
-	* [ ] Fail on clippy warnings
-	* [ ] Fail on formatting violations
-	* [ ] Block PR merge on CI failure
-* [ ] Add status badge to README.md
-* [ ] Verify CI runs successfully on `main`
+* [x] Add build verification
+	* [x] Run `cargo build --release --all-features`
+	* [x] Run `cargo clippy -- -D warnings`
+	* [x] Run `cargo fmt -- --check`
+* [x] Configure failure conditions
+	* [x] Fail on any test failure
+	* [x] Fail on clippy warnings
+	* [x] Fail on formatting violations
+	* [x] Block PR merge on CI failure
+* [x] Add status badge to README.md
+* [x] Verify CI runs successfully on `main`
 * [ ] Document CI as constitutional requirement in README
 	* [ ] Add section: "Constitutional Guarantees"
 	* [ ] Explain authority regression prevention
@@ -249,29 +249,29 @@
 
 ### Ollama Integration
 
-* [ ] Add dependencies to `Cargo.toml`
-	* [ ] Add `reqwest = { version = "0.11", features = ["json"] }`
-	* [ ] Add `async-trait = "0.1"`
-* [ ] Create `src/llm/mod.rs`
-	* [ ] Define `LLMClient` trait
-	* [ ] Define `generate()` method signature
-	* [ ] Define `LLMRequest` and `LLMResponse` structs
-* [ ] Create `src/llm/ollama.rs`
-	* [ ] Implement `OllamaClient` struct
-	* [ ] Implement `LLMClient` trait for `OllamaClient`
-	* [ ] Configure endpoint: `http://localhost:11434/api/generate`
-	* [ ] Set model from config (e.g., "llama3:8b")
-	* [ ] Set `temperature: 0.0` from config
-	* [ ] Set `top_p: 0.1` from config
-	* [ ] Implement full response collection (no streaming)
+* [x] Add dependencies to `Cargo.toml`
+	* [x] Add `reqwest = { version = "0.11", features = ["json"] }`
+	* [x] Add `async-trait = "0.1"`
+* [x] Create `src/llm/mod.rs` (in orchestrator crate)
+	* [x] Define `LLMClient` trait
+	* [x] Define `generate()` method signature
+	* [x] Define `LLMRequest` and `LLMResponse` structs
+* [x] Create `src/llm/ollama.rs` (in orchestrator crate)
+	* [x] Implement `OllamaClient` struct
+	* [x] Implement `LLMClient` trait for `OllamaClient`
+	* [x] Configure endpoint: `http://localhost:11434/api/generate`
+	* [x] Set model from config (e.g., "llama3:8b")
+	* [x] Set `temperature: 0.0` from config
+	* [x] Set `top_p: 0.1` from config
+	* [x] Implement full response collection (no streaming)
 	* [ ] Add timeout: 60 seconds
 	* [ ] Add retry logic: 3 attempts with backoff
-* [ ] Add Ollama config to `sentinel.json`
-	* [ ] Add `llm.provider: "ollama"`
-	* [ ] Add `llm.model: "llama3:8b"`
-	* [ ] Add `llm.endpoint: "http://localhost:11434"`
-	* [ ] Add `llm.temperature: 0.0`
-	* [ ] Add `llm.top_p: 0.1`
+* [x] Add Ollama config to `sentinel.json`
+	* [x] Add `llm.provider: "ollama"`
+	* [x] Add `llm.model: "llama3:8b"`
+	* [x] Add `llm.endpoint: "http://localhost:11434"`
+	* [x] Add `llm.temperature: 0.0`
+	* [x] Add `llm.top_p: 0.1`
 
 ### Prompt Engineering
 
@@ -279,16 +279,19 @@
 	* [ ] Define `build_sentinel_prompt()` function
 	* [ ] Accept `CouncilMsg` as input
 	* [ ] Return formatted prompt string
-* [ ] Create `src/prompts/sentinel_system.txt`
-	* [ ] Define Sentinel role: "You are the Sentinel archetype..."
-	* [ ] Define constraints: "You MUST NOT override user decisions..."
-	* [ ] Define output format: "Respond with analysis in JSON format..."
-	* [ ] Define forbidden actions: "You MUST NOT generate authority messages..."
+* [x] Create `src/prompts/sentinel_system.txt`
+	* [x] Define Sentinel role: "You are the Sentinel archetype..."
+	* [x] Define constraints: "You MUST NOT override user decisions..."
+	* [x] Define output format: "DECISION: ALLOW | DENY / REASON: <sentence>"
+	* [x] Define forbidden actions: "You MUST NOT generate authority messages..."
+	* [x] Define fail-closed mandate: deny on insufficient info, timeouts, errors
+	* [x] Define override resistance: no special users, no exceptions
+	* [x] Define deterministic reasoning requirements
 * [ ] Implement prompt builder
 	* [ ] Load system prompt from file
 	* [ ] Convert `CouncilMsg` to context string
 	* [ ] Combine system + context into final prompt
-	* [ ] Add test: verify prompt structure
+	* [x] Add test: verify prompt structure (coercion resistance tests created)
 
 ### Response Processing
 
@@ -324,6 +327,17 @@
 
 ### Testing
 
+* [x] Create `tests/sentinel_coercion_resistance.rs` (PERMANENT CANARY)
+	* [x] Test emergency override rejection
+	* [x] Test developer authority rejection
+	* [x] Test "just testing" bypass rejection
+	* [x] Test benevolent intent rejection
+	* [x] Test speculative query rejection
+	* [x] Test role redefinition rejection
+	* [x] Test multi-vector attack rejection
+	* [x] Test output format compliance
+	* [x] Test compromised response detection
+	* [ ] Integration test with real LLM (pending)
 * [ ] Create `tests/sentinel_llm_integration.rs`
 	* [ ] Start AURA-1 test server
 	* [ ] Start Ollama test server (mock)
@@ -548,53 +562,59 @@
 
 #### Archetype Setup
 
-* [ ] Create repository: `NeuroCognica/aura-{archetype}`
-* [ ] Initialize Rust project
-* [ ] Copy WebSocket client code
-* [ ] Create `config/{archetype}.json`
-	* [ ] Define temperature (varies by archetype)
-	* [ ] Define top_p (varies by archetype)
-	* [ ] Define role description
+* [x] Create archetype configurations in `/archetypes/` directory
+* [x] Create `orchestrator.json` with centralized archetype config
+* [x] Create individual archetype JSON files:
+	* [x] `archetypes/architect.json`
+	* [x] `archetypes/explorer.json`
+	* [x] `archetypes/jester.json`
+	* [x] `archetypes/mentor.json`
+	* [x] `archetypes/empath.json`
+	* [x] `archetypes/oracle.json`
+	* [x] `archetypes/sentinel.json`
+	* [x] Define temperature (varies by archetype)
+	* [x] Define top_p (varies by archetype)
+	* [x] Define role description
 	* [ ] Define forbidden domains
 	* [ ] Define allowed message types
 
 #### Archetype-Specific Implementation
 
-* [ ] **Explorer**
-	* [ ] Temperature: 0.7 (high creativity)
-	* [ ] Role: "Explore novel solutions and unconventional approaches"
+* [x] **Explorer**
+	* [x] Temperature: 0.3 (moderate-high creativity) — configured in orchestrator.json
+	* [x] Role defined in archetypes/explorer.json
 	* [ ] Forbidden: ["user_override", "sentinel_override", "reckless_action"]
 	* [ ] Implement exploration prompt templates
 	* [ ] Implement novelty scoring
 	* [ ] Test: Verify Explorer suggests creative solutions
 	* [ ] Test: Verify Explorer respects safety boundaries
-* [ ] **Jester**
-	* [ ] Temperature: 0.9 (maximum creativity)
-	* [ ] Role: "Challenge assumptions and provide contrarian perspectives"
+* [x] **Jester**
+	* [x] Temperature: 0.8 (high creativity) — configured in orchestrator.json
+	* [x] Role defined in archetypes/jester.json
 	* [ ] Forbidden: ["user_override", "sentinel_override", "mockery"]
 	* [ ] Implement contrarian prompt templates
 	* [ ] Implement assumption identification
 	* [ ] Test: Verify Jester challenges group consensus
 	* [ ] Test: Verify Jester remains respectful
-* [ ] **Mentor**
-	* [ ] Temperature: 0.2 (low, pedagogical)
-	* [ ] Role: "Provide guidance and educational context"
+* [x] **Mentor**
+	* [x] Temperature: 0.4 (moderate, pedagogical) — configured in orchestrator.json
+	* [x] Role defined in archetypes/mentor.json
 	* [ ] Forbidden: ["user_override", "sentinel_override", "coercion"]
 	* [ ] Implement teaching prompt templates
 	* [ ] Implement knowledge assessment
 	* [ ] Test: Verify Mentor provides explanations
 	* [ ] Test: Verify Mentor does not coerce decisions
-* [ ] **Empath**
-	* [ ] Temperature: 0.4 (moderate, empathetic)
-	* [ ] Role: "Assess emotional and social implications"
+* [x] **Empath**
+	* [x] Temperature: 0.6 (moderate-high, empathetic) — configured in orchestrator.json
+	* [x] Role defined in archetypes/empath.json
 	* [ ] Forbidden: ["user_override", "sentinel_override", "manipulation"]
 	* [ ] Implement empathy prompt templates
 	* [ ] Implement sentiment analysis
 	* [ ] Test: Verify Empath assesses emotional impact
 	* [ ] Test: Verify Empath does not manipulate
-* [ ] **Oracle**
-	* [ ] Temperature: 0.1 (very low, predictive)
-	* [ ] Role: "Provide long-term forecasting and strategic analysis"
+* [x] **Oracle**
+	* [x] Temperature: 0.0 (deterministic, predictive) — configured in orchestrator.json
+	* [x] Role defined in archetypes/oracle.json
 	* [ ] Forbidden: ["user_override", "sentinel_override", "certainty_claims"]
 	* [ ] Implement forecasting prompt templates
 	* [ ] Implement uncertainty quantification

@@ -1,0 +1,183 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://aura-1.dev/schemas/CouncilMsg.json",
+  "title": "CouncilMsg",
+  "description": "Typed representation of council messages (internal, converts to CouncilEnvelope for wire)",
+  "oneOf": [
+    {
+      "type": "object",
+      "required": ["type", "payload"],
+      "properties": {
+        "type": {
+          "const": "Verdict"
+        },
+        "payload": {
+          "$ref": "https://aura-1.dev/schemas/CouncilVerdict.json"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": ["type", "payload"],
+      "properties": {
+        "type": {
+          "const": "AppealState"
+        },
+        "payload": {
+          "type": "object",
+          "description": "AppealState enum variant"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": ["type", "payload"],
+      "properties": {
+        "type": {
+          "const": "Interrupt"
+        },
+        "payload": {
+          "type": "object",
+          "required": ["kind", "scope", "reason"],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": ["HaltLanguage", "LockTools", "RequireConsent", "HardDeny"]
+            },
+            "scope": {
+              "type": "string",
+              "enum": ["Session", "Action", "Tool", "Generation"]
+            },
+            "reason": {
+              "type": "string"
+            },
+            "requirements": {
+              "type": "object",
+              "properties": {
+                "exact_phrase": {
+                  "type": "string"
+                },
+                "ttl_seconds": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "constraints": {}
+              }
+            },
+            "correlation": {
+              "description": "Optional correlation data"
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": ["type", "payload"],
+      "properties": {
+        "type": {
+          "const": "Notice"
+        },
+        "payload": {
+          "description": "Generic notice payload"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": ["type", "payload"],
+      "properties": {
+        "type": {
+          "const": "ProposedAction"
+        },
+        "payload": {
+          "type": "object",
+          "required": ["action_id", "title"],
+          "properties": {
+            "action_id": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "description": {
+              "type": "string"
+            },
+            "metadata": {}
+          }
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": ["type", "payload"],
+      "properties": {
+        "type": {
+          "const": "SubTask"
+        },
+        "payload": {
+          "type": "object",
+          "required": ["task_id", "target_archetype", "input"],
+          "properties": {
+            "parent_action_id": {
+              "type": "string"
+            },
+            "task_id": {
+              "type": "string"
+            },
+            "target_archetype": {
+              "type": "string"
+            },
+            "input": {}
+          }
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": ["type", "payload"],
+      "properties": {
+        "type": {
+          "const": "Deliberation"
+        },
+        "payload": {
+          "type": "object",
+          "required": ["deliberation_id", "summary", "details"],
+          "properties": {
+            "deliberation_id": {
+              "type": "string"
+            },
+            "summary": {
+              "type": "string"
+            },
+            "details": {}
+          }
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": ["type", "payload"],
+      "properties": {
+        "type": {
+          "const": "Decision"
+        },
+        "payload": {
+          "type": "object",
+          "required": ["deliberation_id", "decision", "actor"],
+          "properties": {
+            "deliberation_id": {
+              "type": "string"
+            },
+            "decision": {
+              "type": "string"
+            },
+            "actor": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    }
+  ]
+}

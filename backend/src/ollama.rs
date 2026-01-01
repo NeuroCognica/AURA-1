@@ -45,18 +45,27 @@ struct OllamaMsg {
     content: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct ChatRequest {
     pub session_id: String,
+
+    #[serde(alias = "prompt")]
     pub text: String,
+
     #[serde(default)]
     pub ollama_url: Option<String>,
+
     #[serde(default)]
     pub model: Option<String>,
+
     #[serde(default)]
     pub system: Option<String>,
+
     #[serde(default)]
     pub retrieval: Option<String>,
+
+    #[serde(default)]
+    pub archetype: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -117,7 +126,7 @@ fn options_for_mode(mode: &SessionMode) -> OllamaGenerateOptions {
     }
 }
 
-async fn stream_ollama_chat(
+pub async fn stream_ollama_chat(
     ollama_url: &str,
     model: &str,
     system: &str,
@@ -311,12 +320,12 @@ pub async fn chat_handler(
     }
 
     // 1.5 Appeal pre-check: load appeal state for this session. If the session is AwaitingUser, return the stored verdict/state.
-    match crate::appeal::load_appeal_state(&store, &req.session_id) {
+    match crate::appeal::load_appeal_state(&*store, &req.session_id) {
         Ok(st) => {
             match st {
                 crate::council_verdict::AppealState::AwaitingUser { ref verdict_id, .. } => {
                     // try to load the last verdict; if present, return it with 409 Conflict
-                    match crate::appeal::load_verdict(&store, &req.session_id, &verdict_id.0) {
+                    match crate::appeal::load_verdict(&*store, &req.session_id, &verdict_id.0) {
                         Ok(v) => {
                             let resp = serde_json::json!({"state": &st, "last_verdict": v});
                             return (StatusCode::CONFLICT, resp.to_string());

@@ -1,5 +1,16 @@
 #![allow(dead_code)]
 
+use anyhow;
+
+/// Storage trait abstraction — other modules should depend on this trait instead
+/// of the concrete `RocksStore` type to avoid type identity issues across
+/// feature-gated compilation units.
+pub trait Storage: Send + Sync {
+    fn get_bytes(&self, key: &[u8]) -> anyhow::Result<Option<Vec<u8>>>;
+    fn put_bytes(&self, key: &[u8], val: &[u8]) -> anyhow::Result<()>;
+    fn append_log_atomic(&self, speaker: &str, content: &str) -> anyhow::Result<u64>;
+}
+
 #[cfg(feature = "persistence")]
 mod __storage_impl {
     use rocksdb::{checkpoint::Checkpoint, ColumnFamilyDescriptor, Options, WriteBatch, DB};
@@ -151,6 +162,7 @@ mod __storage_impl {
             Ok(new_id)
         }
 
+        
         /// Return a non-compact proof: the leaf hash and the current peaks (sufficient to recompute root).
         pub fn prove(&self, id: u64) -> anyhow::Result<Option<(Vec<u8>, Vec<Peak>)>> {
             let cf = self.cf_handle("logs");
@@ -420,6 +432,22 @@ mod __storage_impl {
 // Re-export items at crate level when feature is enabled
 #[cfg(feature = "persistence")]
 pub use __storage_impl::RocksStore;
+
+#[cfg(feature = "persistence")]
+// Implement the Storage trait for the concrete RocksStore (after the impl block)
+impl Storage for __storage_impl::RocksStore {
+    fn get_bytes(&self, key: &[u8]) -> anyhow::Result<Option<Vec<u8>>> {
+        self.get_bytes(key)
+    }
+
+    fn put_bytes(&self, key: &[u8], val: &[u8]) -> anyhow::Result<()> {
+        self.put_bytes(key, val)
+    }
+
+    fn append_log_atomic(&self, speaker: &str, content: &str) -> anyhow::Result<u64> {
+        self.append_log_atomic(speaker, content)
+    }
+}
 
 // Provide a minimal stub implementation when `persistence` feature is disabled
 #[cfg(not(feature = "persistence"))]

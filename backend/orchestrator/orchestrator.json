@@ -4,7 +4,7 @@
   },
   "archetypes": {
     "Sentinel": {
-      "model": "llama3:8b",
+      "model": "llama3.1:8b-instruct-q6_K",
       "temperature": 0.0,
       "top_p": 0.1
     },

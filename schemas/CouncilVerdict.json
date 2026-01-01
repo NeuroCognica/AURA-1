@@ -1,0 +1,216 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://aura-1.dev/schemas/CouncilVerdict.json",
+  "title": "CouncilVerdict",
+  "description": "Constitutional verdict from the council system",
+  "type": "object",
+  "required": [
+    "verdict_id",
+    "session_id",
+    "timestamp_ms",
+    "active_archetype",
+    "capability",
+    "sentinel_kind",
+    "sentinel_constraints",
+    "sentinel_message",
+    "dissent",
+    "alchemist_options",
+    "final_state",
+    "next_required"
+  ],
+  "properties": {
+    "verdict_id": {
+      "type": "string",
+      "description": "Unique identifier for this verdict"
+    },
+    "session_id": {
+      "type": "string",
+      "description": "Session this verdict applies to"
+    },
+    "timestamp_ms": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Unix epoch milliseconds when verdict was issued"
+    },
+    "active_archetype": {
+      "type": "string",
+      "description": "Archetype that triggered constitutional review"
+    },
+    "capability": {
+      "type": "string",
+      "enum": ["Code", "Planning", "General", "Voice"],
+      "description": "Capability domain being exercised"
+    },
+    "sentinel_kind": {
+      "type": "string",
+      "enum": ["Allow", "AllowWithWarning", "RequireConsent", "Deny"],
+      "description": "Sentinel's decision on the request"
+    },
+    "sentinel_constraints": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["domain", "severity", "rule_id", "statement"],
+        "properties": {
+          "domain": {
+            "type": "string",
+            "enum": ["Safety", "Security", "Ethics", "Legal", "Sovereignty", "IrreversibleAction", "Privacy"]
+          },
+          "severity": {
+            "type": "string",
+            "enum": ["Low", "Elevated", "Critical"]
+          },
+          "rule_id": {
+            "type": "string"
+          },
+          "statement": {
+            "type": "string"
+          }
+        }
+      },
+      "description": "Constitutional constraints violated or triggered"
+    },
+    "sentinel_message": {
+      "type": "string",
+      "description": "Human-readable explanation from Sentinel"
+    },
+    "consent": {
+      "type": "object",
+      "required": ["exact_phrase", "scope", "ttl_seconds", "conditions"],
+      "properties": {
+        "exact_phrase": {
+          "type": "string",
+          "description": "Phrase user must type to grant consent"
+        },
+        "scope": {
+          "type": "object",
+          "description": "What this consent applies to"
+        },
+        "ttl_seconds": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "How long consent is valid"
+        },
+        "conditions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Conditions under which consent is valid"
+        }
+      },
+      "description": "Consent requirement if sentinel_kind is RequireConsent"
+    },
+    "dissent": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "Dissenting opinions from other archetypes (archetype_id -> reason)"
+    },
+    "alchemist_options": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["option_id", "title", "description", "minimal_changes", "satisfies_constraints"],
+        "properties": {
+          "option_id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "minimal_changes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "satisfies_constraints": {
+            "type": "boolean"
+          }
+        }
+      },
+      "description": "Alchemist-proposed alternative actions"
+    },
+    "final_state": {
+      "type": "string",
+      "enum": ["Allowed", "AllowedWithWarning", "Blocked", "RequireConsent", "RequireUserChoice"],
+      "description": "Final state after all council processing"
+    },
+    "next_required": {
+      "description": "What the user or system must do next",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["type"],
+          "properties": {
+            "type": {
+              "const": "None"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type", "verdict_id", "exact_phrase"],
+          "properties": {
+            "type": {
+              "const": "ProvideConsent"
+            },
+            "verdict_id": {
+              "type": "string"
+            },
+            "exact_phrase": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type", "verdict_id", "option_ids"],
+          "properties": {
+            "type": {
+              "const": "ChooseOption"
+            },
+            "verdict_id": {
+              "type": "string"
+            },
+            "option_ids": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type", "hint"],
+          "properties": {
+            "type": {
+              "const": "ReframeRequest"
+            },
+            "hint": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type", "reason"],
+          "properties": {
+            "type": {
+              "const": "HardStop"
+            },
+            "reason": {
+              "type": "string"
+            }
+          }
+        }
+      ]
+    }
+  }
+}
