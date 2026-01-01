@@ -98,6 +98,50 @@ cd sensors; python head_tracker.py
 cd sensors; python pose_sub.py
 ```
 
+## Workbench Launcher (Desktop Control Interface)
+
+The **workbench** is an Electron-based desktop UI for interacting with AURA archetypes, monitoring system status, and managing conversations. The **Python launcher** orchestrates the full stack startup sequence.
+
+### Quick Start (Python Launcher)
+
+```powershell
+cd launcher
+python launcher.py
+```
+
+The launcher will start services in sequence:
+1. **Ollama** (port 11434) - AI inference engine
+2. **Backend** (port 8080) - Rust authority server
+3. **Workbench Vite** (port 5173) - React dev server
+4. **Electron** - Desktop window loads workbench UI
+
+### Architecture: Three Distinct Components
+
+- **Backend** (`/backend/`) — Rust authority server (Axum, RocksDB, Tantivy, AI orchestration)
+- **Workbench** (`/workbench/`) — Electron desktop UI (React, Tailwind, archetype selector, chat interface)
+- **Frontend** (`/frontend/`) — iOS-compatible Three.js web client (separate from workbench, for VR/AR cockpit)
+
+**Note:** The workbench is the desktop control interface; the frontend is the mobile/web 3D client. These are separate applications.
+
+### Workbench Configuration
+
+The launcher configuration is in `launcher/launcher.config.json`. Key services:
+- `backend`: Cargo run with persistence/search/tls features
+- `vite`: Workbench dev server (React UI)
+- `ollama`: AI inference engine
+- `electron`: Desktop window wrapper
+
+### Manual Workbench Development
+
+To run workbench independently (without Python launcher):
+
+```powershell
+cd workbench
+npm install
+npm run dev              # Terminal 1: Vite dev server
+npm run electron:launch  # Terminal 2: Electron window
+```
+
 See `STATUS_REPORT.md` for more details and next steps.
     ws.on_upgrade(move |socket| handle_ws(socket, addr))
 }

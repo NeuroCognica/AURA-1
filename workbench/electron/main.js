@@ -27,6 +27,7 @@ function createWindow() {
 
   if (process.env.VITE_DEV_SERVER_URL) {
     mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL)
+    mainWindow.webContents.openDevTools()
   } else {
     const indexHtml = path.join(__dirname, '..', 'dist', 'index.html')
     mainWindow.loadFile(indexHtml)
@@ -35,7 +36,7 @@ function createWindow() {
 
 app.whenReady().then(() => {
   // prefer dev server url when available
-  if (process.env.NODE_ENV === 'development') {
+  if (process.env.NODE_ENV === 'development' && !process.env.VITE_DEV_SERVER_URL) {
     process.env.VITE_DEV_SERVER_URL = 'http://localhost:5173'
   }
   createWindow()
