@@ -49,6 +49,8 @@
 
 > **Goal**: Implement the core cognitive engine that routes user intent, manages multi-archetype flows, and enforces the Sentinel's constitutional authority. This phase establishes the separation of concerns between **Authority (AURA-1)** and **Cognition (Orchestrator)**.
 
+**Status (2025-12-31):** Freeze lifted — proceeding at full speed. Milestone `v0.4.4-orchestrator-safe-cognition` (commit `c2dc61ac`) achieved: adapter registry instantiated from validated config, LLM client injected (no globals), Technician adapter wired, and canonical DryRun-only execution enforced. Phase 4 Step 4 is complete; continue with planned workstreams.
+
 ### 3.1. Intent Classification and Routing Protocol
 
 The Orchestrator's first duty is to translate unstructured user input into a structured, actionable plan by identifying the user's intent and selecting the appropriate Archetype(s).
@@ -224,3 +226,58 @@ X. FINAL AGENT INSTRUCTIONS
 Read the Invariant: Every phase has a rule that cannot be broken.
 Check the Log: Always look at RocksDB to verify persistence before assuming success.
 Refusal is Success: If the Sentinel blocks an action, the system is working correctly.
+
+## Appendix — Launcher Integration: Audit & Status
+
+**Summary:** I scaffolded a standalone `launcher/` Electron + Vite + React project that provides an operator console (two windows: Launcher and AURA Interface), sequential service startup, health probes, process management, and IPC for control. The launcher is intended as an operator-only tool (no auto-run).
+
+**Files added:**
+- [launcher/package.json](launcher/package.json)
+- [launcher/vite.config.ts](launcher/vite.config.ts)
+- [launcher/tsconfig.json](launcher/tsconfig.json)
+- [launcher/launcher.config.json](launcher/launcher.config.json)
+- [launcher/electron/tsconfig.electron.json](launcher/electron/tsconfig.electron.json)
+- [launcher/electron/config.ts](launcher/electron/config.ts)
+- [launcher/electron/services.ts](launcher/electron/services.ts)
+- [launcher/electron/preload.ts](launcher/electron/preload.ts)
+- [launcher/electron/main.ts](launcher/electron/main.ts)
+- [launcher/src/main.tsx](launcher/src/main.tsx)
+- [launcher/src/App.tsx](launcher/src/App.tsx)
+- [launcher/src/styles.css](launcher/src/styles.css)
+- [launcher/src/ui/ServiceRow.tsx](launcher/src/ui/ServiceRow.tsx)
+- [launcher/src/ui/StatusLight.tsx](launcher/src/ui/StatusLight.tsx)
+- [launcher/src/ui/LogPane.tsx](launcher/src/ui/LogPane.tsx)
+
+**Checklist (launcher-specific)**
+- [x] Scaffold Electron + Vite + React project under `launcher/`.
+- [x] Implement `ServiceManager` (process spawn, health checks, sequential launch) at [launcher/electron/services.ts](launcher/electron/services.ts).
+- [x] Expose safe IPC via [launcher/electron/preload.ts](launcher/electron/preload.ts).
+- [x] Implement `main.ts` window orchestration and IPC handlers at [launcher/electron/main.ts](launcher/electron/main.ts).
+- [x] Create React UI with status lights, launch/health buttons, and log pane.
+- [ ] Add short `README.md` in `launcher/` with run and dev instructions.
+- [ ] Add tests/integration for health endpoints and `launchAll` sequential behavior.
+- [ ] Wire backend `/health` and `/api/history` endpoints (if not present) to guarantee truthful probes.
+
+**Run verification notes:**
+- The launcher is operator-driven. Typical workflow:
+
+```powershell
+cd launcher
+npm ci
+npm run dev        # run the Vite dev server (UI)
+
+# In another terminal (build + electron)
+cd launcher
+npm run start      # builds and launches Electron (build produces dist-electron/* preload)
+```
+
+- The launcher reads `launcher/launcher.config.json`. Update ports/commands there to match your environment (backend port, Ollama binary path, frontend dev port, etc.).
+
+**Outstanding audit items / next actions**
+- Ensure the backend exposes a deterministic `/health` endpoint that returns 200 only when ready: implement or verify at [backend/src/main.rs](backend/src/main.rs) or appropriate handler.
+- Implement `/api/history?session=last` in the backend to surface persistent history for the frontend check on load.
+- Add `launcher/README.md` with the commands above and notes about `VITE_DEV_SERVER_URL` environment variable for dev mode.
+- Add integration tests: verify `launchAll` returns green states only when services are actually ready; simulate failing health to ensure red light behavior.
+- Decide where to commit built artifacts (they should be ignored); keep `dist/` and backend data out of repository.
+
+If you want, I will add `launcher/README.md`, create the integration test skeletons, and run local verification steps (npm install, build) — say which you'd like me to do next.

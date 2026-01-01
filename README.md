@@ -73,6 +73,14 @@ Current Status (2025-12-29):
 - Pose pipeline validated end-to-end. See `STATUS_REPORT.md` for run instructions and notes.
 - Backend built with `persistence`, `search`, and `tls` features; TLS configured for local testing with mkcert-generated certs.
 
+Milestone: v0.4.4-orchestrator-safe-cognition
+
+- Commit: c2dc61ac
+- Summary: Completed Phase 4 Step 4 — adapter registry, config-driven LLM wiring, Technician adapter, and a canonical DryRun-only execution chokepoint. Adapters are constructed from validated `orchestrator.json` and the LLM client is dependency-injected (no global). Missing archetypes fail startup (fail-fast).
+- CI status: Workspace tests, orchestrator no-default-features, backend feature-matrix, release build, and frontend build all passed locally. Tag `v0.4.4-orchestrator-safe-cognition` pushed to origin.
+
+Note: The system remains in DryRun-only mode; `ExecutionMode::Live` is intentionally disabled until Phase 4 Step 5 authorization and safety checks are complete.
+
 Quick sensor run commands (developer):
 
 ```powershell
