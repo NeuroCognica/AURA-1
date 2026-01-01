@@ -12,3 +12,4 @@ pub mod search;
 pub mod broadcast;
 pub mod council_verdict;
 pub mod generation_manager;
+pub mod archetype_api;
