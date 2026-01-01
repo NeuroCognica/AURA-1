@@ -93,6 +93,10 @@ impl OrchestratorConfig {
         })
     }
 
+    pub fn llm_endpoint(&self) -> &str {
+        &self.llm.endpoint
+    }
+
     pub fn load_from_file(path: &str) -> Result<Self, ConfigError> {
         let s = fs::read_to_string(path)?;
         Self::load_from_str(&s)

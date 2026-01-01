@@ -8,16 +8,27 @@ export default function App() {
   return (
     <div className="h-screen w-screen bg-neutral-900 text-neutral-100">
       <TopBar />
-      <div className="flex h-[calc(100vh-56px)]">
-        <aside className="w-72 border-r border-neutral-800 p-4">
-          <LeftColumn />
-        </aside>
-        <main className="flex-1 p-4 overflow-auto">
-          <CenterColumn />
-        </main>
-        <aside className="w-80 border-l border-neutral-800 p-4">
-          <RightColumn />
-        </aside>
+
+      <div className="h-[calc(100vh-56px)] p-4">
+        <div className="h-full grid gap-4 grid-cols-[minmax(320px,1.2fr)_minmax(260px,0.8fr)_minmax(360px,1fr)]">
+          <section className="h-full border border-neutral-800 rounded-lg overflow-hidden">
+            <div className="h-full p-4">
+              <LeftColumn />
+            </div>
+          </section>
+
+          <section className="h-full border border-neutral-800 rounded-lg overflow-hidden">
+            <div className="h-full p-4">
+              <CenterColumn />
+            </div>
+          </section>
+
+          <section className="h-full border border-neutral-800 rounded-lg overflow-hidden">
+            <div className="h-full p-4">
+              <RightColumn />
+            </div>
+          </section>
+        </div>
       </div>
     </div>
   )

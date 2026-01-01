@@ -1,12 +1,14 @@
 import React from 'react'
 import { useTheme } from '../themes/ThemeContext'
 import { ARCHETYPES } from '../themes/archetypes'
+import ChatPanel from './ChatPanel'
+import ChatHistory from './ChatHistory'
 
 export default function LeftColumn() {
   const { current, setArchetype } = useTheme()
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col h-full gap-4">
       <div>
         <label className="block text-sm text-neutral-400">Archetype</label>
         <select
@@ -27,13 +29,14 @@ export default function LeftColumn() {
         <input type="checkbox" disabled className="mt-2" />
       </div>
 
-      <div className={`flex-1 p-3 rounded border ${current.layoutHints?.emphasize === 'left' ? 'emphasize-left' : current.layoutHints?.emphasize === 'center' ? 'emphasize-center' : current.layoutHints?.emphasize === 'right' ? 'emphasize-right' : ''}`} style={{ background: 'var(--panel-glass)' }}>
-        <div className="text-sm" style={{ color: 'var(--text-primary)' }}>Chat (placeholder)</div>
-        <div className="mt-4 text-xs text-neutral-500">No messages — static placeholder.</div>
-      </div>
+      <div className={`flex-1 flex flex-col p-0 rounded ${current.layoutHints?.emphasize === 'left' ? 'emphasize-left' : current.layoutHints?.emphasize === 'center' ? 'emphasize-center' : current.layoutHints?.emphasize === 'right' ? 'emphasize-right' : ''}`} style={{ background: 'var(--panel-glass)' }}>
+        <div className="flex-1 p-3">
+          <ChatPanel />
+        </div>
 
-      <div>
-        <input className="w-full p-2 bg-neutral-800 border border-neutral-700 rounded" placeholder="Type a message" disabled />
+        <div className="mt-2">
+          <ChatHistory />
+        </div>
       </div>
     </div>
   )

@@ -2,6 +2,7 @@
   "name": "aura-workbench",
   "version": "0.0.0",
   "private": true,
+  "main": "electron/main.js",
   "scripts": {
     "dev": "vite",
     "build": "vite build",

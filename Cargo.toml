@@ -1,5 +1,5 @@
 [workspace]
-members = ["backend", "backend/sentinel"]
+members = ["backend", "backend/sentinel", "backend/orchestrator"]
 resolver = "2"
 
 [workspace.package]

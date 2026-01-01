@@ -198,6 +198,10 @@ pub enum CouncilMsgType {
     AppealState,
     SentinelNotice,
     Interrupt,
+    ProposedAction,
+    SubTask,
+    Deliberation,
+    Decision,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -253,6 +257,38 @@ pub struct CouncilEnvelope {
     pub payload: serde_json::Value,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProposedAction {
+    pub action_id: String,
+    pub title: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SubTask {
+    pub parent_action_id: Option<String>,
+    pub task_id: String,
+    pub target_archetype: String,
+    pub input: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Deliberation {
+    pub deliberation_id: String,
+    pub summary: String,
+    pub details: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Decision {
+    pub deliberation_id: String,
+    pub decision: String,
+    pub actor: String,
+}
+
 /// Typed message payloads for council envelopes. This enum is the
 /// canonical typed representation; `make_council_envelope` converts
 /// it into the existing `CouncilEnvelope` struct (preserving the
@@ -264,6 +300,10 @@ pub enum CouncilMsg {
     AppealState(AppealState),
     Interrupt(InterruptPayload),
     Notice(serde_json::Value),
+    ProposedAction(ProposedAction),
+    SubTask(SubTask),
+    Deliberation(Deliberation),
+    Decision(Decision),
 }
 
 /// Construct a `CouncilEnvelope` from typed pieces. `seq` is left to
@@ -320,6 +360,50 @@ pub fn make_council_envelope(
             vid,
             payload: n,
         },
+        CouncilMsg::ProposedAction(p) => {
+            let payload = serde_json::to_value(p).unwrap_or_else(|_| serde_json::json!({}));
+            CouncilEnvelope {
+                seq,
+                msg_type: CouncilMsgType::ProposedAction,
+                ts_ms: ts,
+                sid: sid.to_string(),
+                vid,
+                payload,
+            }
+        }
+        CouncilMsg::SubTask(s2) => {
+            let payload = serde_json::to_value(s2).unwrap_or_else(|_| serde_json::json!({}));
+            CouncilEnvelope {
+                seq,
+                msg_type: CouncilMsgType::SubTask,
+                ts_ms: ts,
+                sid: sid.to_string(),
+                vid,
+                payload,
+            }
+        }
+        CouncilMsg::Deliberation(d) => {
+            let payload = serde_json::to_value(d).unwrap_or_else(|_| serde_json::json!({}));
+            CouncilEnvelope {
+                seq,
+                msg_type: CouncilMsgType::Deliberation,
+                ts_ms: ts,
+                sid: sid.to_string(),
+                vid,
+                payload,
+            }
+        }
+        CouncilMsg::Decision(dc) => {
+            let payload = serde_json::to_value(dc).unwrap_or_else(|_| serde_json::json!({}));
+            CouncilEnvelope {
+                seq,
+                msg_type: CouncilMsgType::Decision,
+                ts_ms: ts,
+                sid: sid.to_string(),
+                vid,
+                payload,
+            }
+        }
     }
 }
 
