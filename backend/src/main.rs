@@ -1,7 +1,7 @@
 use axum::body::Body as HyperBody;
 use axum::extract::Path as AxPath;
 use axum::http::{header, StatusCode};
-use axum::{extract::Extension, routing::get, Json, Router};
+use axum::{extract::Extension, routing::{get, post}, Json, Router};
 use base64::Engine;
 use mime_guess;
 use rustls::crypto::ring;
@@ -67,7 +67,7 @@ async fn main() -> anyhow::Result<()> {
     let (council_bcast_tx, _council_bcast_rx) = tokio::sync::broadcast::channel::<String>(256);
     // Typed council broadcast channel (migration path to typed transport)
     let (council_bcast_typed_tx, _council_bcast_typed_rx) =
-        tokio::sync::broadcast::channel::<crate::council_verdict::CouncilEnvelope>(256);
+        tokio::sync::broadcast::channel::<aura_backend::council_verdict::CouncilEnvelope>(256);
 
     // GenerationManager for cancellation / gen_id tracking
     let gen_mgr = std::sync::Arc::new(generation_manager_mod::GenerationManager::new());
@@ -256,6 +256,35 @@ async fn main() -> anyhow::Result<()> {
             }),
         )
         .route("/", get(|| async { "AURA-1 backend prototype" }));
+
+    // Expose archetype activation route using the existing library handler and
+    // provide the required Extensions (archetypes map, council broadcasts).
+    let app = app
+        .route(
+            "/api/archetype/activate",
+            axum::routing::post({
+                let arche = archetypes.clone();
+                let council = council_bcast_tx.clone();
+                let council_typed = council_bcast_typed_tx.clone();
+                move |axum::Json(payload): axum::Json<serde_json::Value>| {
+                    let arche = arche.clone();
+                    let council = council.clone();
+                    let council_typed = council_typed.clone();
+                    async move {
+                        aura_backend::archetype_api::activate_archetype_handler(
+                            axum::Json(payload),
+                            axum::Extension(arche),
+                            axum::Extension(council),
+                            axum::Extension(council_typed),
+                        )
+                        .await
+                    }
+                }
+            }),
+        )
+        .layer(Extension(archetypes.clone()))
+        .layer(Extension(council_bcast_tx.clone()))
+        .layer(Extension(council_bcast_typed_tx.clone()));
 
     #[cfg(feature = "persistence")]
     let app = {
@@ -606,6 +635,69 @@ fn load_archetypes(dir: &str) -> anyhow::Result<HashMap<String, Value>> {
 
 async fn health() -> &'static str {
     "ok"
+}
+
+// Reusable handler for archetype activation. Extracted so tests can call it.
+pub async fn activate_archetype_handler(
+    axum::Json(payload): axum::Json<Value>,
+    Extension(arche): Extension<std::sync::Arc<std::collections::HashMap<String, Value>>>,
+    Extension(council_bcast): Extension<tokio::sync::broadcast::Sender<String>>,
+    Extension(council_bcast_typed): Extension<tokio::sync::broadcast::Sender<crate::council_verdict::CouncilEnvelope>>,
+) -> (axum::http::StatusCode, axum::Json<Value>) {
+    let archetype_str = payload
+        .get("archetype")
+        .and_then(|v| v.as_str())
+        .unwrap_or("architect");
+    let ritual = payload.get("ritual").and_then(|v| v.as_bool()).unwrap_or(false);
+
+    let key = archetype_str.to_string();
+    let theme_vars = arche
+        .get(&key)
+        .and_then(|v| v.get("cssVars"))
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
+
+    let audio_sig = arche
+        .get(&key)
+        .and_then(|v| v.get("audio"))
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({"tone":"F#","duration_ms":400,"wave":"sine"}));
+
+    let transition = if ritual {
+        serde_json::json!({"mode": "ritual", "duration_ms": 600})
+    } else {
+        serde_json::json!({"mode": "instant", "duration_ms": 0})
+    };
+
+    let resp = serde_json::json!({
+        "archetype": archetype_str,
+        "theme_vars": theme_vars,
+        "audio_signature": audio_sig,
+        "transition": transition
+    });
+
+    let msg = crate::council_verdict::CouncilWsMsg {
+        kind: "archetype_changed".to_string(),
+        session_id: "system".to_string(),
+        payload: resp.clone(),
+    };
+
+    if let Ok(s) = serde_json::to_string(&msg) {
+        let _ = council_bcast.send(s.clone());
+    }
+
+    // typed envelope publish (best-effort)
+    let env = crate::council_verdict::CouncilEnvelope {
+        seq: 0,
+        msg_type: crate::council_verdict::CouncilMsgType::SentinelNotice,
+        ts_ms: crate::council_verdict::now_ms(),
+        sid: "system".to_string(),
+        vid: None,
+        payload: resp.clone(),
+    };
+    let _ = council_bcast_typed.send(env);
+
+    (axum::http::StatusCode::OK, axum::Json(resp))
 }
 
 async fn telemetry_processor_task(
