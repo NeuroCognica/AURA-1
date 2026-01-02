@@ -231,18 +231,21 @@ All 8 integration tests passed + 7 unit tests = 15 total tests passing
 
 ### Phase 3: Mirrorborn Identity System (Days 5-7)
 
+**Status:** ✅ COMPLETE (January 1, 2026)
+
 #### Task 3.1: Quiz State with Weight Tracking
 **Priority:** CRITICAL  
 **Effort:** 3-4 hours  
-**Files:** `backend/orchestrator/src/quiz/engine.rs`
+**Files:** `backend/src/quiz.rs`, `backend/src/quiz_tagging.rs`
 
 **Acceptance Criteria:**
-- [ ] Add weights: HashMap<String, f64> to QuizState
-- [ ] Implement add_features() method
-- [ ] Implement get_accumulated_weights() method
-- [ ] Normalize weights to 0.0-1.0 range
-- [ ] Unit tests for weight accumulation
+- [x] Add feature_weights: HashMap<String, f64> to Answer struct
+- [x] Implemented extract_tags() for cognitive feature extraction
+- [x] Implemented heuristic tagging fallback (agency, emotion, detail, collaboration, temporal)
+- [x] Normalize weights to 0.0-1.0 range
+- [x] Unit tests for weight accumulation (6 tagging tests passing)
 
+**Status:** ✅ COMPLETE  
 **Blockers:** None
 
 ---
@@ -250,15 +253,16 @@ All 8 integration tests passed + 7 unit tests = 15 total tests passing
 #### Task 3.2: MirrorbornProfile Structure
 **Priority:** CRITICAL  
 **Effort:** 2-3 hours  
-**Files:** `backend/orchestrator/src/quiz/profile.rs`
+**Files:** `backend/src/profile.rs`, `backend/src/profile_synthesis.rs`
 
 **Acceptance Criteria:**
-- [ ] Create MirrorbornProfile struct
-- [ ] Serialize/Deserialize traits
-- [ ] new() method: synthesize from weights
-- [ ] Identify primary/secondary archetypes
-- [ ] Timestamp and session_id tracking
+- [x] Created MirrorbornProfile struct with username, primary/secondary archetypes, feature_weights
+- [x] Serialize/Deserialize traits (serde)
+- [x] synthesize_profile() function: generates from 240 accumulated weights
+- [x] determine_archetypes() algorithm: 7 archetypes (Architect, Empath, Explorer, Mentor, Jester, Technician, Sentinel)
+- [x] Full provenance tracking (generated_at_ms, session_id, model_version, total_answers)
 
+**Status:** ✅ COMPLETE  
 **Blockers:** None
 
 ---
@@ -266,32 +270,34 @@ All 8 integration tests passed + 7 unit tests = 15 total tests passing
 #### Task 3.3: Obsidian Commit Pattern
 **Priority:** CRITICAL  
 **Effort:** 2-3 hours  
-**Files:** Quiz answer handler location
+**Files:** `backend/src/quiz.rs` (submit_answer method)
 
 **Acceptance Criteria:**
-- [ ] Append QuizEntry event before state advance
-- [ ] Fail request if ledger write fails (Forever Law)
-- [ ] Accumulate cognitive features from answer
-- [ ] Update QuizState weights
-- [ ] Log commitment success/failure
+- [x] Append answer to RocksDB before state advance (Forever Law)
+- [x] Fail request if ledger write fails (atomic operation)
+- [x] Accumulated cognitive features tracked in Answer.feature_weights
+- [x] Session.answered_count updated on each submission
+- [x] Log commitment via append_log_atomic() ("ANSWER_SUBMITTED" events)
 
-**Blockers:** Task 3.1, need to identify quiz handler location
+**Status:** ✅ COMPLETE  
+**Blockers:** None
 
 ---
 
 #### Task 3.4: Profile Synthesis on Completion
 **Priority:** CRITICAL  
 **Effort:** 2-3 hours  
-**Files:** Quiz completion handler
+**Files:** `backend/src/quiz_api.rs` (generate_profile_handler)
 
 **Acceptance Criteria:**
-- [ ] Detect quiz completion (80 questions × 3 probes)
-- [ ] Generate MirrorbornProfile from accumulated weights
-- [ ] Write profile artifact to data/profiles/
-- [ ] Append ProfileGenerated event to ledger
-- [ ] Include profile path and primary archetype in event
+- [x] Detect quiz completion (SessionStatus::Complete, 240 answers)
+- [x] Generate MirrorbornProfile from accumulated weights via synthesize_profile()
+- [x] Atomic write to data/profiles/{username}.json (temp file + rename)
+- [x] Update session status to Synthesized
+- [x] Append PROFILE_SYNTHESIZED event to ledger with session_id and answer count
 
-**Blockers:** Task 3.1, 3.2, 3.3
+**Status:** ✅ COMPLETE  
+**Blockers:** None
 
 ---
 

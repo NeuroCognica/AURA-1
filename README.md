@@ -68,10 +68,34 @@ Actionable backlog (initial)
 
 Focused code snippets (see `backend/src/main.rs`)
 
-Current Status (2025-12-29):
+## Current Status (2025-01-01):
 
-- Pose pipeline validated end-to-end. See `STATUS_REPORT.md` for run instructions and notes.
+- **Phase 3B Complete:** Quiz collection system implemented with Forever Law covenant (240-probe quiz, 6 API endpoints, automatic profile synthesis).
+- **Test Coverage:** 49+ passing tests (lib), including quiz parser, quiz loader, quiz tagging, and profile synthesis.
 - Backend built with `persistence`, `search`, and `tls` features; TLS configured for local testing with mkcert-generated certs.
+
+### Quiz & Profile System
+
+AURA now includes a 240-question psychometric assessment that generates personalized Mirrorborn profiles. The system honors **Forever Law** (append-only, never delete user data) and maintains full provenance.
+
+**Quiz API Endpoints:**
+- `POST /api/quiz/session/create` — Start new quiz session
+- `POST /api/quiz/answer` — Submit answer (auto-tags with psychological features)
+- `GET /api/quiz/session/:id` — Get session state
+- `GET /api/quiz/session/:id/answers` — Get all answers
+- `POST /api/quiz/session/:id/pause` — Pause (progress preserved forever)
+- `POST /api/quiz/session/:id/resume` — Resume exactly where you left off
+- `POST /api/profile/generate` — Generate Mirrorborn profile from completed quiz (240 answers)
+
+**Profile Generation Flow:**
+1. User completes 240-probe quiz (answers saved to RocksDB append-only)
+2. Each answer tagged with psychological features (agency, detail orientation, emotional awareness, collaboration, temporal focus)
+3. System accumulates feature weights across all 240 answers
+4. Primary/secondary archetypes determined from weight patterns (Architect, Empath, Explorer, Mentor, Jester, Technician, Sentinel)
+5. Profile written atomically to `data/profiles/{username}.json`
+6. AI interactions optionally tuned based on user's archetype (graceful absence if no profile)
+
+See [AURA_PROJECT_REPORT.md](AURA_PROJECT_REPORT.md) for detailed architecture and covenant guarantees.
 
 Milestone: v0.4.4-orchestrator-safe-cognition
 

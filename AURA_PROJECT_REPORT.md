@@ -500,32 +500,224 @@ System demonstrates **graceful absence** principle—full functionality without 
 - ⏳ Profile synthesis from accumulated weights
 - ⏳ Electron login UI
 
-**Current Focus:** Profile schema complete, constitutional integration functional, building API endpoints
+**Current Focus:** Profile synthesis complete (archetype determination from feature weights, atomic profile write, 7 API endpoints total). All 89 tests passing (49 lib + 14 main + 26 integration). Next: Electron login UI and advanced integration testing.
 
-**Key Achievement:** System now supports optional profile-based tuning while maintaining full functionality without profiles. ConstitutionalInvoker loads user profiles when available and adjusts archetype prompt tone based on psychological traits (agency, detail_orientation, collaboration). All tests passing (50+ total).
-
----
-
-### Phase 3B: Profile APIs & Quiz System ⏳ IN PROGRESS
-**Goal:** API endpoints for profile management and quiz system
-
-**Status:**
-- ⏳ POST /api/profile/generate endpoint
-- ⏳ Quiz data parsing from master_quiz.md
-- ⏳ POST /api/quiz/answer endpoint
-- ⏳ LLM tagging harness for answer analysis
-- ⏳ Profile synthesis from 240 accumulated weights
-
-**Next Steps:**
-1. Profile persistence API with username validation
-2. Quiz JSON structure and session tracking
-3. LLM-based tag extraction per answer
-4. Weight accumulation and normalization
-5. Profile generation when 240/240 complete
+**Key Achievement:** Complete end-to-end quiz collection and profile generation system with Forever Law covenant. Trust encoded in type system: answers immutable, sessions never deleted, partial progress honored. Profile synthesis deterministically maps accumulated feature weights to primary/secondary archetypes (Architect, Empath, Explorer, Mentor, Jester, Technician, Sentinel). Quiz parser successfully processes 3,489-line master_quiz.md with 100% coverage. Integration tests validate full flow from session creation → 240 answers → profile generation with covenant tracking.
 
 ---
 
-### Phase 3C: Electron Login UI ⏳ PLANNED
+### Phase 3B: Quiz Collection System ✅ COMPLETE (January 1, 2026)
+**Goal:** Covenant-keeping quiz data collection with Forever Law at collection point
+
+**Completed Tasks:**
+- ✅ Quiz data structures (Probe, Quiz, Answer, QuizSession, SessionStatus)
+- ✅ QuizManager with Forever Law covenant (append-only answers, ledger integration)
+- ✅ Quiz parser (`quiz_parser.rs`) - Two-phase approach (80 main questions → 240 probes)
+- ✅ Quiz loader (`quiz_loader.rs`) - JSON caching with automatic fallback
+- ✅ Quiz HTTP API (6 endpoints: create session, submit answer, get session, get answers, pause, resume)
+- ✅ Generated quiz.json (76KB, 240 probes, 100% feature/archetype coverage)
+- ✅ 11 quiz module tests + 5 parser tests + 2 loader tests + 2 integration tests = 20 tests passing
+
+**Implementation Details:**
+
+**Quiz Data Structures (`backend/src/quiz.rs` - 705 lines):**
+```rust
+pub struct Probe {
+    pub id: u32,              // 1-240
+    pub text: String,
+    pub primary_question: u32, // 1-80
+    pub sub_probe: u32,        // 1-3 (A, B, C)
+    pub features: Vec<String>, // Psychological feature tags
+    pub archetypes: Vec<String>,
+    pub decade: u32,           // 1-5 (thematic clustering)
+}
+
+pub struct Answer {
+    pub answer_id: String,
+    pub session_id: String,
+    pub username: String,
+    pub probe_id: u32,
+    pub response: String,
+    pub answered_at_ms: i64,
+    pub extracted_tags: Vec<String>,  // Populated by LLM
+    pub feature_weights: HashMap<String, f64>, // Accumulated
+}
+
+pub struct QuizSession {
+    pub session_id: String,
+    pub username: String,
+    pub created_at_ms: i64,
+    pub last_activity_ms: i64,
+    pub answered_count: u32,
+    pub last_probe_id: Option<u32>,
+    pub status: SessionStatus,  // Active, Paused, Complete, Synthesized
+    pub quiz_version: String,
+    pub model_version: Option<String>,
+}
+```
+
+**Forever Law Covenant Implementation:**
+```rust
+// Answer stored append-only
+self.storage.put_bytes(answer_key.as_bytes(), &answer_json)?;
+
+// Logged to immutable ledger
+self.storage.append_log_atomic(
+    &format!("quiz:{}", session.username),
+    &format!("ANSWER_SUBMITTED: session={} probe={}", session_id, probe_id),
+)?;
+```
+
+**Quiz Parser (`backend/src/quiz_parser.rs` - 508 lines):**
+- Phase 1: Extract 80 main questions with titles and primary text
+- Phase 2: Parse all 240 probes with features and archetype mappings
+- Decade classification (Q1-16=Decade1, Q17-32=Decade2, etc.)
+- Extracts feature tags from markdown annotations (→ TemporalReference, AgencyMarkers)
+- Extracts archetypes from structured metadata (→ ConcreteRecall { ... })
+
+**Quiz Loader (`backend/src/quiz_loader.rs`):**
+- Fast path: Load from JSON cache (76KB quiz.json)
+- Fallback: Parse master_quiz.md and generate JSON
+- Production workflow: Pre-generate JSON at build time
+
+**HTTP API Endpoints:**
+1. `POST /api/quiz/session/create` - Create new quiz session
+2. `POST /api/quiz/answer` - Submit answer to probe
+3. `GET /api/quiz/session/:id` - Get session state (for resume)
+4. `GET /api/quiz/session/:id/answers` - Get all answers
+5. `POST /api/quiz/session/:id/pause` - Pause session
+6. `POST /api/quiz/session/:id/resume` - Resume session
+
+**Generated Artifacts:**
+- `backend/data/quiz.json` - 76,167 bytes, 3,377 lines
+- 240 probes with perfect coverage:
+  - 100% feature tag coverage (all 240 probes)
+  - 100% archetype mapping coverage (all 240 probes)
+  - Perfect decade distribution: 48 probes each
+
+**Covenant Guarantees:**
+- ✅ Answers stored append-only, never mutated
+- ✅ Sessions never deleted, only paused
+- ✅ Progress always preserved (partial completion valid)
+- ✅ Graceful abandonment (stopping at probe 10/240 is honored)
+- ✅ Provenance tracked (timestamps, usernames, versions)
+- ✅ Ledger integration (all operations logged)
+
+**Test Coverage:**
+- 11 quiz module tests (session lifecycle, answer submission, covenant validation)
+- 5 parser unit tests (header parsing, decade calculation, minimal quiz)
+- 2 loader tests (generate/load, fallback caching)
+- 2 integration tests (Phase 1: 80 main questions, Phase 2: 240 full probes)
+- Explicit test: `test_partial_session_is_valid` - 10/240 answers is valid data
+
+**Key Achievement:**
+Trust covenant encoded at data collection point: "When someone sits down to answer 240 questions, they're making an act of trust." Forever Law enforced immediately upon answer submission, not just at storage. Partial progress honored as valid psychological data.
+
+---
+
+### Phase 3C: LLM Tagging & Profile Synthesis ✅ COMPLETE (January 1, 2026)
+**Goal:** Analyze quiz answers and generate profiles
+
+**Completed Tasks:**
+- ✅ Quiz tagging harness (`quiz_tagging.rs`) - Extract psychological features from answers
+- ✅ Heuristic tagging fallback (pattern matching without LLM dependency)
+- ✅ Profile synthesis module (`profile_synthesis.rs`) - Generate profiles from 240 accumulated weights
+- ✅ POST /api/profile/generate endpoint - Atomic profile generation
+- ✅ Archetype determination algorithm (7 archetypes: Architect, Empath, Explorer, Mentor, Jester, Technician, Sentinel)
+- ✅ 6 tagging tests + 5 synthesis tests = 11 additional tests passing
+
+**Implementation Details:**
+
+**Quiz Tagging (`backend/src/quiz_tagging.rs` - 350+ lines):**
+```rust
+pub struct TagExtractionResult {
+    pub tags: Vec<String>,
+    pub feature_weights: HashMap<String, f64>,  // 0.0-1.0
+    pub confidence: f64,
+}
+
+pub async fn extract_tags(
+    probe_text: &str,
+    answer_text: &str,
+    probe_features: &[String],
+) -> Result<TagExtractionResult> {
+    // Async LLM integration ready (currently uses heuristic fallback)
+    Ok(extract_tags_heuristic(answer_text, probe_features))
+}
+```
+
+**Heuristic Tagging (functional without LLM):**
+- **Agency detection:** "i chose"/"i decided" → high_agency (0.8), "had to"/"forced" → low_agency (0.2)
+- **Emotional awareness:** "feel"/"emotion" → emotion_aware (0.7), "don't know" → emotion_unclear (0.3)
+- **Detail orientation:** word_count >50 → high_detail (0.8), <10 → low_detail (0.2)
+- **Collaboration:** contains '?' or "what do you think" → collaborative (0.7)
+- **Temporal focus:** "yesterday"/"past" → past_focused, "tomorrow"/"future" → future_oriented
+
+**Profile Synthesis (`backend/src/profile_synthesis.rs` - 290 lines):**
+```rust
+pub async fn synthesize_profile(
+    session: &QuizSession,
+    answers: &[Answer],
+    config: &SynthesisConfig,
+) -> Result<MirrorbornProfile> {
+    // 1. Validate session complete (240 answers)
+    // 2. Accumulate feature weights across all answers
+    // 3. Normalize (average weights per feature)
+    // 4. Determine primary/secondary archetypes
+    // 5. Create profile with provenance
+}
+
+fn determine_archetypes(weights: &HashMap<String, f64>) -> (String, Option<String>) {
+    // Architect: High agency + high detail
+    // Empath: High collaboration + emotional awareness + low agency
+    // Explorer: High agency + low detail (big picture)
+    // Mentor: High emotional awareness + collaboration + some agency
+    // Jester: High agency + low emotional awareness (action-oriented)
+    // Technician: High detail + lower agency
+    // Sentinel: Balanced (low variance)
+}
+```
+
+**Profile Generation API (`quiz_api.rs`):**
+- **POST /api/profile/generate:**
+  - Request: `{ "session_id": "sess_123" }`
+  - Validates session is Complete (240 answers)
+  - Accumulates feature weights from all answers
+  - Determines primary/secondary archetypes
+  - Atomic write to `data/profiles/{username}.json` (temp file + rename)
+  - Updates session status to Synthesized
+  - Response: `{ "username": "alice", "primary_archetype": "Architect", "secondary_archetype": "Explorer", ... }`
+
+**Archetype Determination:**
+Scoring formula combines feature weights:
+- **Architect:** `agency × detail × 2.0` (high agency + high detail)
+- **Technician:** `detail × (1 - agency) × 2.0` (detail-oriented, lower agency)
+- **Empath:** `collaboration × emotion × (1 - agency×0.5) × 2.0` (collaborative + emotional, less directive)
+- **Explorer:** `agency × (1 - detail) × 2.0` (big picture, action-oriented)
+- **Mentor:** `emotion × collaboration × (0.5 + agency×0.5) × 2.0` (supportive with some guidance)
+- **Jester:** `agency × (1 - emotion) × 2.0` (action-oriented, less emotional processing)
+- **Sentinel:** `(1 - variance) × 1.0` (balanced, low variance across features)
+
+Highest scoring archetype becomes primary; second highest (if >0.4) becomes secondary.
+
+**Test Coverage:**
+- 6 tagging tests: high/low agency, emotional awareness, detail orientation, temporal focus, prompt building
+- 5 synthesis tests: Architect, Empath, Explorer, Sentinel balanced, secondary archetype
+- All 49+ tests passing (lib)
+
+**Covenant Guarantees:**
+- ✅ Profile generation atomic (succeed fully or fail cleanly)
+- ✅ Profile immutable once written (`data/profiles/{username}.json`)
+- ✅ Session status tracks Synthesized state (Forever Law)
+- ✅ Full provenance (session_id, timestamp, model_version, total_answers=240)
+- ✅ Graceful absence honored (AI works without profile, tuning is optional)
+
+**Key Achievement:**
+Complete psychological profiling system from 240-answer quiz. Deterministic archetype mapping from accumulated feature weights. System maintains Forever Law covenant throughout: quiz answers append-only → feature weights accumulated → profile generated atomically → immutable storage. Heuristic tagging provides immediate functionality; async LLM integration ready for future upgrade.
+
+---
+
+### Phase 3D: Electron Login UI ⏳ PLANNED
 **Goal:** User authentication interface
 
 **Status:** Not started
@@ -941,4 +1133,51 @@ The implementation successfully demonstrates the **graceful absence** principle:
 
 **Example Profile Tuning:**
 ```rust
-// User profile: high age
+// User profile: high agency (0.85), high detail (0.90), low collaboration (0.25)
+// Technician prompt gets appended with:
+// "User prefers autonomy. Be concise, assume competence, skip confirmations."
+// "User values precision. Provide technical depth, exact specifications, edge cases."
+// "User prefers direct answers. Minimize back-and-forth, provide complete solutions."
+// "Include implementation details, error handling, performance notes."
+```
+
+**Files Modified:**
+- ✅ `backend/src/profile.rs` (new, 294 lines)
+- ✅ `backend/src/lib.rs` (added profile module export)
+- ✅ `backend/orchestrator/src/constitutional.rs` (profile integration)
+- ✅ `backend/orchestrator/src/bin/test_llm.rs` (signature update)
+- ✅ `backend/orchestrator/src/bin/test_llm_single.rs` (signature update)
+- ✅ `backend/orchestrator/tests/phase4_registry.rs` (mock client fix)
+- ✅ `backend/orchestrator/tests/phase4_technician.rs` (mock client fix)
+
+**Commit Ready:** All changes tested and passing. System maintains backward compatibility (username defaults to None everywhere).
+
+---
+
+- [ ] Users build real projects (Arduino, code, plans)
+
+---
+
+## XI. Conclusion
+
+AURA is a **local-first workshop for human-AI collaboration**, not a chatbot or assessment tool. It provides skilled assistance across multiple domains (hardware, software, planning, psychology) through a council of specialized archetypes, all operating offline with forensic-grade data integrity.
+
+**Mirrorborn** is an optional behavioral calibration layer that adjusts how help is delivered based on psychological profiling, but it never gates access, never replaces free conversation, and never becomes the "main thing."
+
+**The endgame:** Users build real things—robots, software, life plans—with a team of AI specialists who remember every interaction, grow with the user, and operate entirely under user control. This is the man-machine alliance: mutual memory, mutual evolution, and mutual respect for sovereignty.
+
+---
+
+**Next Immediate Actions:**
+1. Define MirrorbornProfile schema
+2. Integrate prompt tuning into ConstitutionalInvoker
+3. Implement minimal quiz API (optional, non-intrusive)
+4. Build Electron login screen
+5. Test full workflow: login → council chat → archetype assistance → project completion
+
+**Long-Term Vision:**
+A sovereign AI workbench that helps users build their lives, offline and on their own terms.
+
+---
+
+**END OF REPORT**

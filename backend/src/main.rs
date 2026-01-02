@@ -200,7 +200,20 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/account/create", post(accounts_api::create_account_handler))
         .route("/api/account/login", post(accounts_api::login_handler))
         .route("/api/account/:username", get(accounts_api::get_account_handler));
-    
+
+    // Quiz collection endpoints (covenant-keeping 240-question profiling)
+    #[cfg(feature = "persistence")]
+    let app = {
+        use aura_backend::quiz_api;
+        app
+            .route("/api/quiz/session/create", post(quiz_api::create_session_handler))
+            .route("/api/quiz/answer", post(quiz_api::submit_answer_handler))
+            .route("/api/quiz/session/:id", get(quiz_api::get_session_handler))
+            .route("/api/quiz/session/:id/answers", get(quiz_api::get_session_answers_handler))
+            .route("/api/quiz/session/:id/pause", post(quiz_api::pause_session_handler))
+            .route("/api/quiz/session/:id/resume", post(quiz_api::resume_session_handler))
+    };
+
     let app = app
         .route(
             "/api/archetypes",
