@@ -5,6 +5,8 @@ import { TokenRenderer } from "./language/TokenRenderer";
 import { CouncilClient } from "./clients/councilClient";
 import { AiClient } from "./clients/aiClient";
 import SentinelOverlay from "./components/SentinelOverlay";
+import { useTheme } from "./themes/ThemeContext";
+import ArchetypeSelector from "./components/ArchetypeSelector";
 
 const tokenListStyle: React.CSSProperties = {
   padding: 12,
@@ -18,8 +20,8 @@ export const App: React.FC = () => {
 
   // create clients
   useEffect(() => {
-    const council = new CouncilClient({ url: "ws://localhost/ws/council", store });
-    const ai = new AiClient({ url: "ws://localhost/ws/ai", tokenRenderer: { handleToken: (t) => tokenHandler(t) } });
+    const council = new CouncilClient({ url: "ws://127.0.0.1:8080/ws/council", store });
+    const ai = new AiClient({ url: "ws://127.0.0.1:8080/ws/ai", tokenRenderer: { handleToken: (t) => tokenHandler(t) } });
 
     council.connect();
     ai.connect();
@@ -43,8 +45,14 @@ export const App: React.FC = () => {
   return (
     <Provider store={store}>
       <div>
-        <h1>AURA Frontend Shell (dev)</h1>
-        <div style={tokenListStyle}>
+        <h1 style={{ marginTop: 8 }}>AURA Frontend Shell (dev)</h1>
+        <ArchetypeSelector />
+        <div className={`aura-panel ${
+          (useTheme().current.layoutHints?.emphasize === "left" && "emphasize-left") ||
+          (useTheme().current.layoutHints?.emphasize === "center" && "emphasize-center") ||
+          (useTheme().current.layoutHints?.emphasize === "right" && "emphasize-right") ||
+          ""
+        }`} style={tokenListStyle}>
           <strong>Rendered Tokens</strong>
           <div>
             {tokens.map((t, i) => (

@@ -1,36 +1,41 @@
-use axum::{
-    extract::Extension,
-    routing::get,
-    Json, Router,
-};
-use std::path::Path;
-use std::net::SocketAddr;
-use std::sync::Arc;
-use std::collections::HashMap;
+use axum::body::Body as HyperBody;
+use axum::extract::Path as AxPath;
+use axum::http::{header, StatusCode};
+use axum::{extract::Extension, routing::{get, post}, Json, Router};
+use base64::Engine;
+use mime_guess;
+use rustls::crypto::ring;
 use serde_json::Value;
+use std::collections::HashMap;
+use std::net::SocketAddr;
+use std::path::Path;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::Instant;
+use tokio::fs;
 use tokio::net::TcpListener;
 use tokio::sync::{mpsc, watch, Notify};
 use tracing::{info, warn};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use rustls::crypto::ring;
-use axum::http::{header, StatusCode};
-use base64::Engine;
-use axum::extract::Path as AxPath;
-use axum::body::Body as HyperBody;
-use tokio::fs;
-use mime_guess;
+
 
 mod telemetry;
 use crate::telemetry::Pose;
 mod broadcast;
 use crate::broadcast as broadcast_mod;
+mod appeal;
+mod council_verdict;
+mod storage;
+mod intent_stratification;
+mod archetype_api;
+mod generation_manager;
+mod chat_api;
 #[cfg(feature = "persistence")]
 mod ollama;
 mod sentinel;
-mod council_verdict;
-mod appeal;
-mod generation_manager;
+#[cfg(feature = "persistence")]
+mod accounts;
+#[cfg(feature = "persistence")]
+mod accounts_api;
 use crate::generation_manager as generation_manager_mod;
 
 #[tokio::main]
@@ -43,7 +48,11 @@ async fn main() -> anyhow::Result<()> {
         .expect("failed to install rustls ring crypto provider");
 
     // latest-value telemetry path (watch channel)
-    let (pose_tx, _pose_rx) = watch::channel(Pose { yaw: 0.0, pitch: 0.0, roll: 0.0 });
+    let (pose_tx, _pose_rx) = watch::channel(Pose {
+        yaw: 0.0,
+        pitch: 0.0,
+        roll: 0.0,
+    });
 
     // AI work queue (bounded)
     let (ai_tx, ai_rx) = mpsc::channel::<String>(16);
@@ -64,7 +73,8 @@ async fn main() -> anyhow::Result<()> {
     let (ai_bcast_tx, _ai_bcast_rx) = tokio::sync::broadcast::channel::<String>(1024);
     let (council_bcast_tx, _council_bcast_rx) = tokio::sync::broadcast::channel::<String>(256);
     // Typed council broadcast channel (migration path to typed transport)
-    let (council_bcast_typed_tx, _council_bcast_typed_rx) = tokio::sync::broadcast::channel::<crate::council_verdict::CouncilEnvelope>(256);
+    let (council_bcast_typed_tx, _council_bcast_typed_rx) =
+        tokio::sync::broadcast::channel::<crate::council_verdict::CouncilEnvelope>(256);
 
     // GenerationManager for cancellation / gen_id tracking
     let gen_mgr = std::sync::Arc::new(generation_manager_mod::GenerationManager::new());
@@ -79,10 +89,21 @@ async fn main() -> anyhow::Result<()> {
     };
 
     // Spawn actors
-    tokio::spawn(telemetry_processor_task(pose_tx.subscribe(), telemetry_counter.clone()));
+    tokio::spawn(telemetry_processor_task(
+        pose_tx.subscribe(),
+        telemetry_counter.clone(),
+    ));
     tokio::spawn(audio_buffer_task());
-    tokio::spawn(ai_orchestrator_task(ai_rx, persist_tx.clone(), slow_inference.clone(), ai_queue_len.clone()));
-    tokio::spawn(persistence_worker_task(persist_rx, persist_queue_len.clone()));
+    tokio::spawn(ai_orchestrator_task(
+        ai_rx,
+        persist_tx.clone(),
+        slow_inference.clone(),
+        ai_queue_len.clone(),
+    ));
+    tokio::spawn(persistence_worker_task(
+        persist_rx,
+        persist_queue_len.clone(),
+    ));
 
     #[cfg(feature = "persistence")]
     let store = {
@@ -95,8 +116,10 @@ async fn main() -> anyhow::Result<()> {
 
     // Startup check: verify configured Ollama model is reachable. Non-fatal: warn only.
     {
-        let ollama_url = std::env::var("OLLAMA_URL").unwrap_or_else(|_| "http://127.0.0.1:11434".to_string());
-        let model = std::env::var("OLLAMA_DEFAULT_MODEL").unwrap_or_else(|_| "deepseek-coder:6.7b".to_string());
+        let ollama_url =
+            std::env::var("OLLAMA_URL").unwrap_or_else(|_| "http://127.0.0.1:11434".to_string());
+        let model = std::env::var("OLLAMA_DEFAULT_MODEL")
+            .unwrap_or_else(|_| "deepseek-coder:6.7b".to_string());
         let url = ollama_url.clone();
         let model_name = model.clone();
         tokio::spawn(async move {
@@ -108,7 +131,10 @@ async fn main() -> anyhow::Result<()> {
                         // Expect an array or object; do a simple substring search for model name
                         let s = json.to_string();
                         if !s.contains(&model_name) {
-                            warn!("configured ollama model not found: {} (models response: {})", model_name, s);
+                            warn!(
+                                "configured ollama model not found: {} (models response: {})",
+                                model_name, s
+                            );
                         } else {
                             info!("ollama model present: {}", model_name);
                         }
@@ -129,7 +155,11 @@ async fn main() -> anyhow::Result<()> {
             loop {
                 t.tick().await;
                 let now = Instant::now();
-                let pose = Pose { yaw: now.elapsed().as_secs_f32() % 1.0, pitch: 0.0, roll: 0.0 };
+                let pose = Pose {
+                    yaw: now.elapsed().as_secs_f32() % 1.0,
+                    pitch: 0.0,
+                    roll: 0.0,
+                };
                 let _ = gen_tx.send(pose);
             }
         });
@@ -137,20 +167,23 @@ async fn main() -> anyhow::Result<()> {
 
     let app = Router::new()
         .route("/health", get(health))
-        .route("/metrics", get({
-            let telemetry_counter = telemetry_counter.clone();
-            let ai_queue_len = ai_queue_len.clone();
-            let persist_queue_len = persist_queue_len.clone();
-            move || async move {
-                let lines = format!(
-                    "telemetry_received {}\nai_queue_len {}\npersist_queue_len {}\n",
-                    telemetry_counter.load(Ordering::Relaxed),
-                    ai_queue_len.load(Ordering::Relaxed),
-                    persist_queue_len.load(Ordering::Relaxed)
-                );
-                (axum::http::StatusCode::OK, lines)
-            }
-        }))
+        .route(
+            "/metrics",
+            get({
+                let telemetry_counter = telemetry_counter.clone();
+                let ai_queue_len = ai_queue_len.clone();
+                let persist_queue_len = persist_queue_len.clone();
+                move || async move {
+                    let lines = format!(
+                        "telemetry_received {}\nai_queue_len {}\npersist_queue_len {}\n",
+                        telemetry_counter.load(Ordering::Relaxed),
+                        ai_queue_len.load(Ordering::Relaxed),
+                        persist_queue_len.load(Ordering::Relaxed)
+                    );
+                    (axum::http::StatusCode::OK, lines)
+                }
+            }),
+        )
         .route("/ws/telemetry", get(telemetry::ws_telemetry_handler))
         // Ingest endpoints (PC side) — connectors for native sidecars
         .route("/ws/pose-ingest", get(broadcast_mod::ws_pose_ingest))
@@ -159,57 +192,128 @@ async fn main() -> anyhow::Result<()> {
         .route("/ws/pose", get(broadcast_mod::ws_pose_client))
         .route("/ws/voice", get(broadcast_mod::ws_voice_client))
         .route("/ws/ai", get(broadcast_mod::ws_ai_handler))
-        .route("/ws/council", get(broadcast_mod::ws_council_handler))
-        .route("/api/archetypes", get({
-            let arche = archetypes.clone();
-            move || {
-                let arche = arche.clone();
-                async move {
-                    // clone the map for response serialization
-                    let data = arche.as_ref().clone();
-                    (axum::http::StatusCode::OK, Json(data))
-                }
-            }
-        }))
-        // Debug: read recent session messages (persistence feature only)
-        .route("/debug/session/:id", get(|AxPath(session_id): AxPath<String>| async move {
-            // Open RocksDB on demand for debugging so we don't depend on router extensions here.
-            match storage::RocksStore::open(std::path::PathBuf::from("data/rocksdb")) {
-                Ok(store) => match store.load_recent_chat(&session_id, 200) {
-                    Ok(v) => (StatusCode::OK, serde_json::to_string(&v).unwrap_or_else(|_| "[]".to_string())),
-                    Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("error: {}", e)),
-                },
-                Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("error opening db: {}", e)),
-            }
-        }))
-        .route("/toggle_slow_inference", get({
-            let slow_inference = slow_inference.clone();
-            move || async move {
-                let prev = slow_inference.fetch_xor(true, Ordering::SeqCst);
-                let state = if prev { "off" } else { "on" };
-                (axum::http::StatusCode::OK, format!("slow_inference {}", state))
-            }
-        }))
-        .route("/enqueue_ai", axum::routing::post({
-            let ai_tx = ai_tx.clone();
-            let ai_queue_len = ai_queue_len.clone();
-            move |Json(payload): Json<serde_json::Value>| {
-                let ai_tx = ai_tx.clone();
-                let ai_queue_len = ai_queue_len.clone();
-                async move {
-                    let s = payload.to_string();
-                    match ai_tx.try_send(s) {
-                        Ok(()) => {
-                            ai_queue_len.fetch_add(1, Ordering::Relaxed);
-                            (axum::http::StatusCode::ACCEPTED, "enqueued")
-                        }
-                        Err(_) => (axum::http::StatusCode::SERVICE_UNAVAILABLE, "queue full"),
+        .route("/ws/council", get(broadcast_mod::ws_council_handler));
+    
+    // Account management endpoints (offline login system)
+    #[cfg(feature = "persistence")]
+    let app = app
+        .route("/api/account/create", post(accounts_api::create_account_handler))
+        .route("/api/account/login", post(accounts_api::login_handler))
+        .route("/api/account/:username", get(accounts_api::get_account_handler));
+
+    // Quiz collection endpoints (covenant-keeping 240-question profiling)
+    #[cfg(feature = "persistence")]
+    let app = {
+        use aura_backend::quiz_api;
+        app
+            .route("/api/quiz/session/create", post(quiz_api::create_session_handler))
+            .route("/api/quiz/answer", post(quiz_api::submit_answer_handler))
+            .route("/api/quiz/session/:id", get(quiz_api::get_session_handler))
+            .route("/api/quiz/session/:id/answers", get(quiz_api::get_session_answers_handler))
+            .route("/api/quiz/session/:id/pause", post(quiz_api::pause_session_handler))
+            .route("/api/quiz/session/:id/resume", post(quiz_api::resume_session_handler))
+    };
+
+    let app = app
+        .route(
+            "/api/archetypes",
+            get({
+                let arche = archetypes.clone();
+                move || {
+                    let arche = arche.clone();
+                    async move {
+                        // clone the map for response serialization
+                        let data = arche.as_ref().clone();
+                        (axum::http::StatusCode::OK, Json(data))
                     }
                 }
-            }
-        }))
-        
+            }),
+        )
+        // Debug: read recent session messages (persistence feature only)
+        .route(
+            "/debug/session/:id",
+            get(|AxPath(session_id): AxPath<String>| async move {
+                // Open RocksDB on demand for debugging so we don't depend on router extensions here.
+                match storage::RocksStore::open(std::path::PathBuf::from("data/rocksdb")) {
+                    Ok(store) => match store.load_recent_chat(&session_id, 200) {
+                        Ok(v) => (
+                            StatusCode::OK,
+                            serde_json::to_string(&v).unwrap_or_else(|_| "[]".to_string()),
+                        ),
+                        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("error: {}", e)),
+                    },
+                    Err(e) => (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        format!("error opening db: {}", e),
+                    ),
+                }
+            }),
+        )
+        .route(
+            "/toggle_slow_inference",
+            get({
+                let slow_inference = slow_inference.clone();
+                move || async move {
+                    let prev = slow_inference.fetch_xor(true, Ordering::SeqCst);
+                    let state = if prev { "off" } else { "on" };
+                    (
+                        axum::http::StatusCode::OK,
+                        format!("slow_inference {}", state),
+                    )
+                }
+            }),
+        )
+        .route(
+            "/enqueue_ai",
+            axum::routing::post({
+                let ai_tx = ai_tx.clone();
+                let ai_queue_len = ai_queue_len.clone();
+                move |Json(payload): Json<serde_json::Value>| {
+                    let ai_tx = ai_tx.clone();
+                    let ai_queue_len = ai_queue_len.clone();
+                    async move {
+                        let s = payload.to_string();
+                        match ai_tx.try_send(s) {
+                            Ok(()) => {
+                                ai_queue_len.fetch_add(1, Ordering::Relaxed);
+                                (axum::http::StatusCode::ACCEPTED, "enqueued")
+                            }
+                            Err(_) => (axum::http::StatusCode::SERVICE_UNAVAILABLE, "queue full"),
+                        }
+                    }
+                }
+            }),
+        )
         .route("/", get(|| async { "AURA-1 backend prototype" }));
+
+    // Expose archetype activation route using the existing library handler and
+    // provide the required Extensions (archetypes map, council broadcasts).
+    let app = app
+        .route(
+            "/api/archetype/activate",
+            axum::routing::post({
+                let arche = archetypes.clone();
+                let council = council_bcast_tx.clone();
+                let council_typed = council_bcast_typed_tx.clone();
+                move |axum::Json(payload): axum::Json<serde_json::Value>| {
+                    let arche = arche.clone();
+                    let council = council.clone();
+                    let council_typed = council_typed.clone();
+                    async move {
+                        crate::archetype_api::activate_archetype_handler(
+                            axum::Json(payload),
+                            axum::Extension(arche),
+                            axum::Extension(council),
+                            axum::Extension(council_typed),
+                        )
+                        .await
+                    }
+                }
+            }),
+        )
+        .layer(Extension(archetypes.clone()))
+        .layer(Extension(council_bcast_tx.clone()))
+        .layer(Extension(council_bcast_typed_tx.clone()));
 
     #[cfg(feature = "persistence")]
     let app = {
@@ -284,7 +388,7 @@ async fn main() -> anyhow::Result<()> {
                     }
                 }
             }))
-            .route("/api/chat", axum::routing::post(crate::ollama::chat_handler))
+                .route("/api/chat", axum::routing::post(crate::chat_api::chat_handler))
                 .route("/api/appeal", axum::routing::post({
                     let store = store.clone();
                     move |Json(payload): Json<crate::appeal::AppealRequest>| {
@@ -311,10 +415,10 @@ async fn main() -> anyhow::Result<()> {
                         let gen_mgr = gen_mgr.clone();
                         async move {
                             // load verdict
-                            match crate::appeal::load_verdict(&store, &req.session_id, &req.verdict_id) {
+                            match crate::appeal::load_verdict(&*store, &req.session_id, &req.verdict_id) {
                                 Ok(v) => {
                                     // load current state
-                                    let st = match crate::appeal::load_appeal_state(&store, &req.session_id) {
+                                        let st = match crate::appeal::load_appeal_state(&*store, &req.session_id) {
                                         Ok(s) => s,
                                         Err(e) => return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, format!("error: {}", e)),
                                     };
@@ -323,7 +427,7 @@ async fn main() -> anyhow::Result<()> {
                                     match crate::appeal::submit_consent(&st, &v, &req.phrase, now_ms) {
                                         Ok(new_st) => {
                                             // persist and broadcast state
-                                            if let Err(e) = crate::appeal::save_appeal_state(&store, &req.session_id, &new_st) {
+                                            if let Err(e) = crate::appeal::save_appeal_state(&*store, &req.session_id, &new_st) {
                                                 return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, format!("save error: {}", e));
                                             }
                                             // Persist and broadcast the new appeal state on the council channel
@@ -398,7 +502,6 @@ async fn main() -> anyhow::Result<()> {
                     }
                 }))
             .layer(Extension(store.clone()))
-        
     };
 
     // Attach shared state as axum `Extension`s so handlers can extract them.
@@ -414,62 +517,73 @@ async fn main() -> anyhow::Result<()> {
     let app = app.layer(Extension(gen_mgr.clone()));
 
     // Serve static TTS/audio files from `backend/data/audio` at `/audio/{file...}`
-    let app = app.route(
-        "/audio/*file",
-        get(audio_file_handler),
-    );
+    let app = app.route("/audio/*file", get(audio_file_handler));
 
     // Debug: route that extracts the in-memory `store` Extension and returns recent chat
     let app = app.route(
         "/debug/session_ext/:id",
-        get(|AxPath(session_id): AxPath<String>, Extension(store): Extension<Option<Arc<storage::RocksStore>>>| async move {
-            if let Some(store) = store {
-                match store.load_recent_chat(&session_id, 200) {
-                    Ok(v) => (StatusCode::OK, serde_json::to_string(&v).unwrap_or_else(|_| "[]".to_string())),
-                    Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("error: {}", e)),
+        get(
+            |AxPath(session_id): AxPath<String>,
+             Extension(store): Extension<Option<Arc<storage::RocksStore>>>| async move {
+                if let Some(store) = store {
+                    match store.load_recent_chat(&session_id, 200) {
+                        Ok(v) => (
+                            StatusCode::OK,
+                            serde_json::to_string(&v).unwrap_or_else(|_| "[]".to_string()),
+                        ),
+                        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("error: {}", e)),
+                    }
+                } else {
+                    (StatusCode::NOT_FOUND, "persistence not enabled".to_string())
                 }
-            } else {
-                (StatusCode::NOT_FOUND, "persistence not enabled".to_string())
-            }
-        }),
+            },
+        ),
     );
 
-async fn audio_file_handler(AxPath(file): AxPath<String>) -> axum::response::Response {
-    let base = std::path::Path::new("data/audio");
-    // prevent path traversal
-    let safe_path = match std::path::Path::new(&file).components().filter(|c| !matches!(c, std::path::Component::ParentDir)).fold(std::path::PathBuf::new(), |mut acc, comp| { acc.push(comp); acc }) {
-        p => base.join(p),
-    };
+    async fn audio_file_handler(AxPath(file): AxPath<String>) -> axum::response::Response {
+        let base = std::path::Path::new("data/audio");
+        // prevent path traversal
+        let safe_path = match std::path::Path::new(&file)
+            .components()
+            .filter(|c| !matches!(c, std::path::Component::ParentDir))
+            .fold(std::path::PathBuf::new(), |mut acc, comp| {
+                acc.push(comp);
+                acc
+            }) {
+            p => base.join(p),
+        };
 
-    if !safe_path.exists() {
-        return axum::response::Response::builder()
-            .status(StatusCode::NOT_FOUND)
-            .body(HyperBody::from("not found"))
-            .unwrap();
-    }
-
-    match fs::read(&safe_path).await {
-        Ok(data) => {
-            let mime = mime_guess::from_path(&safe_path).first_or_octet_stream().to_string();
-            let resp = axum::response::Response::builder()
-                .header(header::CONTENT_TYPE, mime)
-                .body(HyperBody::from(data))
+        if !safe_path.exists() {
+            return axum::response::Response::builder()
+                .status(StatusCode::NOT_FOUND)
+                .body(HyperBody::from("not found"))
                 .unwrap();
-            resp
         }
-        Err(_) => axum::response::Response::builder()
-            .status(StatusCode::INTERNAL_SERVER_ERROR)
-            .body(HyperBody::from("error opening file"))
-            .unwrap(),
-    }
-}
 
-// WebSocket handlers moved to `telemetry` module.
+        match fs::read(&safe_path).await {
+            Ok(data) => {
+                let mime = mime_guess::from_path(&safe_path)
+                    .first_or_octet_stream()
+                    .to_string();
+                let resp = axum::response::Response::builder()
+                    .header(header::CONTENT_TYPE, mime)
+                    .body(HyperBody::from(data))
+                    .unwrap();
+                resp
+            }
+            Err(_) => axum::response::Response::builder()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .body(HyperBody::from("error opening file"))
+                .unwrap(),
+        }
+    }
+
+    // WebSocket handlers moved to `telemetry` module.
 
     #[cfg(feature = "tls")]
     {
-        use std::path::PathBuf;
         use axum_server::tls_rustls::RustlsConfig;
+        use std::path::PathBuf;
 
         // Prefer certs in ./certs/ (mkcert workflow); fallback to plain HTTP if missing.
         let cert_path = PathBuf::from("certs/cert.pem");
@@ -477,17 +591,24 @@ async fn audio_file_handler(AxPath(file): AxPath<String>) -> axum::response::Res
 
         if cert_path.exists() && key_path.exists() {
             info!("starting AURA-1 backend with TLS");
+            info!("AURA backend starting -- binding HTTP server");
             let config = RustlsConfig::from_pem_file(cert_path, key_path).await?;
             let addr: SocketAddr = "0.0.0.0:8443".parse()?;
+            info!("AURA backend listening on {}", addr);
             axum_server::bind_rustls(addr, config)
                 .serve(app.into_make_service_with_connect_info::<SocketAddr>())
                 .await?;
         } else {
             let addr: SocketAddr = "0.0.0.0:8080".parse()?;
             info!("TLS certs not found; starting plain HTTP on {addr}");
+            info!("AURA backend starting -- binding HTTP server");
             let listener = TcpListener::bind(addr).await?;
-            axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
-                .await?;
+            info!("AURA backend listening on {}", addr);
+            axum::serve(
+                listener,
+                app.into_make_service_with_connect_info::<SocketAddr>(),
+            )
+            .await?;
         }
     }
 
@@ -495,10 +616,15 @@ async fn audio_file_handler(AxPath(file): AxPath<String>) -> axum::response::Res
     {
         let addr: SocketAddr = "0.0.0.0:8080".parse()?;
         info!("starting AURA-1 backend on {addr}");
+        info!("AURA backend starting -- binding HTTP server");
 
         let listener = TcpListener::bind(addr).await?;
-        axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
-            .await?;
+        info!("AURA backend listening on {}", addr);
+        axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .await?;
     }
     Ok(())
 }
@@ -527,8 +653,15 @@ fn load_archetypes(dir: &str) -> anyhow::Result<HashMap<String, Value>> {
         }
         let s = std::fs::read_to_string(&path)?;
         let v: Value = serde_json::from_str(&s)?;
-        let key = v.get("id").and_then(|x| x.as_str()).map(|s| s.to_string())
-            .or_else(|| path.file_stem().and_then(|n| n.to_str()).map(|s| s.to_string()))
+        let key = v
+            .get("id")
+            .and_then(|x| x.as_str())
+            .map(|s| s.to_string())
+            .or_else(|| {
+                path.file_stem()
+                    .and_then(|n| n.to_str())
+                    .map(|s| s.to_string())
+            })
             .unwrap_or_else(|| path.to_string_lossy().to_string());
         map.insert(key, v);
     }
@@ -539,9 +672,73 @@ async fn health() -> &'static str {
     "ok"
 }
 
- 
+// Reusable handler for archetype activation. Extracted so tests can call it.
+pub async fn activate_archetype_handler(
+    axum::Json(payload): axum::Json<Value>,
+    Extension(arche): Extension<std::sync::Arc<std::collections::HashMap<String, Value>>>,
+    Extension(council_bcast): Extension<tokio::sync::broadcast::Sender<String>>,
+    Extension(council_bcast_typed): Extension<tokio::sync::broadcast::Sender<crate::council_verdict::CouncilEnvelope>>,
+) -> (axum::http::StatusCode, axum::Json<Value>) {
+    let archetype_str = payload
+        .get("archetype")
+        .and_then(|v| v.as_str())
+        .unwrap_or("architect");
+    let ritual = payload.get("ritual").and_then(|v| v.as_bool()).unwrap_or(false);
 
-async fn telemetry_processor_task(mut rx: watch::Receiver<Pose>, telemetry_counter: Arc<AtomicU64>) {
+    let key = archetype_str.to_string();
+    let theme_vars = arche
+        .get(&key)
+        .and_then(|v| v.get("cssVars"))
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
+
+    let audio_sig = arche
+        .get(&key)
+        .and_then(|v| v.get("audio"))
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({"tone":"F#","duration_ms":400,"wave":"sine"}));
+
+    let transition = if ritual {
+        serde_json::json!({"mode": "ritual", "duration_ms": 600})
+    } else {
+        serde_json::json!({"mode": "instant", "duration_ms": 0})
+    };
+
+    let resp = serde_json::json!({
+        "archetype": archetype_str,
+        "theme_vars": theme_vars,
+        "audio_signature": audio_sig,
+        "transition": transition
+    });
+
+    let msg = crate::council_verdict::CouncilWsMsg {
+        kind: "archetype_changed".to_string(),
+        session_id: "system".to_string(),
+        payload: resp.clone(),
+    };
+
+    if let Ok(s) = serde_json::to_string(&msg) {
+        let _ = council_bcast.send(s.clone());
+    }
+
+    // typed envelope publish (best-effort)
+    let env = crate::council_verdict::CouncilEnvelope {
+        seq: 0,
+        msg_type: crate::council_verdict::CouncilMsgType::SentinelNotice,
+        ts_ms: crate::council_verdict::now_ms(),
+        sid: "system".to_string(),
+        vid: None,
+        payload: resp.clone(),
+    };
+    let _ = council_bcast_typed.send(env);
+
+    (axum::http::StatusCode::OK, axum::Json(resp))
+}
+
+async fn telemetry_processor_task(
+    mut rx: watch::Receiver<Pose>,
+    telemetry_counter: Arc<AtomicU64>,
+) {
     loop {
         // wait for a change; this ensures latest-value semantics
         if rx.changed().await.is_err() {
@@ -589,7 +786,10 @@ async fn ai_orchestrator_task(
     }
 }
 
-async fn persistence_worker_task(mut rx: mpsc::Receiver<String>, persist_queue_len: Arc<AtomicU64>) {
+async fn persistence_worker_task(
+    mut rx: mpsc::Receiver<String>,
+    persist_queue_len: Arc<AtomicU64>,
+) {
     while let Some(item) = rx.recv().await {
         // account for queue length: decrement when processing
         persist_queue_len.fetch_sub(1, Ordering::Relaxed);
@@ -599,9 +799,8 @@ async fn persistence_worker_task(mut rx: mpsc::Receiver<String>, persist_queue_l
     }
 }
 
-#[cfg(feature = "persistence")]
-#[allow(dead_code)]
-mod storage;
+// `storage` module is declared at crate root (backend/src/storage.rs)
+// storage implementation is feature-gated inside the module file itself.
 
 #[cfg(feature = "search")]
 #[allow(dead_code)]
@@ -625,15 +824,15 @@ mod search {
         let mut writer = index.writer(50_000_000)?;
         writer.add_document(doc!(schema.get_field("content").unwrap() => "hello aura"))?;
         writer.commit()?;
-            let reader = index.reader()?;
+        let reader = index.reader()?;
         Ok((writer, reader))
     }
 
     pub fn search_content(reader: &IndexReader, query_str: &str) -> tantivy::Result<Vec<String>> {
         let searcher = reader.searcher();
-            let schema = searcher.index().schema();
+        let schema = searcher.index().schema();
         let content = schema.get_field("content").unwrap();
-            let query = tantivy::query::QueryParser::for_index(searcher.index(), vec![content])
+        let query = tantivy::query::QueryParser::for_index(searcher.index(), vec![content])
             .parse_query(query_str)?;
         let top_docs = searcher.search(&query, &TopDocs::with_limit(5))?;
         // Return a placeholder string per hit to avoid materializing `Document` here.

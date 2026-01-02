@@ -1,0 +1,9 @@
+{
+  "llm": {
+    "provider": "ollama",
+    "endpoint": "http://localhost:11434",
+    "model": "llama3:8b",
+    "temperature": 0.0,
+    "top_p": 0.1
+  }
+}

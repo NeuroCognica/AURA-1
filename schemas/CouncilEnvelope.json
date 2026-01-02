@@ -1,0 +1,36 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://aura-1.dev/schemas/CouncilEnvelope.json",
+  "title": "CouncilEnvelope",
+  "description": "Wire format for council messages over WebSocket",
+  "type": "object",
+  "required": ["seq", "type", "ts_ms", "sid", "payload"],
+  "properties": {
+    "seq": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Monotonically increasing sequence number for this session"
+    },
+    "type": {
+      "type": "string",
+      "enum": ["verdict", "appeal_state", "sentinel_notice", "interrupt", "proposed_action", "sub_task", "deliberation", "decision"],
+      "description": "Message type discriminator"
+    },
+    "ts_ms": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Unix epoch milliseconds when message was created"
+    },
+    "sid": {
+      "type": "string",
+      "description": "Session identifier"
+    },
+    "vid": {
+      "type": "string",
+      "description": "Optional verdict identifier for tracking"
+    },
+    "payload": {
+      "description": "Type-specific payload (shape depends on 'type' field)"
+    }
+  }
+}

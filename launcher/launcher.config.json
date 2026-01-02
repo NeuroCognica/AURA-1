@@ -1,0 +1,44 @@
+{
+  "services": [
+    {
+      "name": "backend",
+      "cmd": "cargo run --manifest-path ../backend/Cargo.toml --bin aura-backend",
+      "cwd": "../backend",
+      "health": {
+        "type": "http",
+        "url": "http://127.0.0.1:8080/health"
+      }
+    },
+    {
+      "name": "vite",
+      "cmd": "npm",
+      "args": ["run", "dev"],
+      "cwd": "C:/AURA-1/workbench",
+      "health": {
+        "type": "http",
+        "url": "http://127.0.0.1:5173"
+      }
+    },
+    {
+      "name": "ollama",
+      "cmd": "ollama serve",
+      "cwd": "./",
+      "health": {
+        "type": "tcp",
+        "host": "127.0.0.1",
+        "port": 11434
+      }
+    }
+    ,
+    {
+      "name": "electron",
+      "cmd": "npm",
+      "args": ["run", "electron:launch"],
+      "cwd": "C:/AURA-1/workbench",
+      "health": {
+        "type": "process"
+      }
+    }
+  ],
+  "healthIntervalSeconds": 3
+}

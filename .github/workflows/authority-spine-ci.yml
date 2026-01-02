@@ -1,0 +1,87 @@
+name: Authority Spine CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-test:
+    name: Build, Lint & Test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+              - name: no-features
+                features: ""
+              - name: search
+                features: "search"
+              - name: tls
+                features: "tls"
+              - name: persistence
+                features: "persistence"
+              - name: persistence-search
+                features: "persistence search"
+              - name: persistence-tls
+                features: "persistence tls"
+              - name: search-tls
+                features: "search tls"
+              - name: persistence-search-tls
+                features: "persistence search tls"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake nasm
+
+      - name: Install Rust toolchain
+        uses: ashald/setup-rust@v1
+        with:
+          toolchain: stable
+
+      - name: Cache cargo registry and build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ matrix.include.name }}-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Rust fmt check
+        run: |
+          cargo fmt -- --check
+
+      - name: Clippy (deny warnings)
+        run: |
+          cargo clippy --all-targets --all-features -- -D warnings
+        continue-on-error: false
+
+      - name: Run tests (features: ${{ matrix.include.features }})
+        env:
+          RUSTFLAGS: "-C target-cpu=native"
+        run: |
+          if [ -z "${{ matrix.include.features }}" ]; then
+            cargo test --all -- --nocapture
+          else
+            cargo test --all --features "${{ matrix.include.features }}" -- --nocapture
+          fi
+
+      - name: Explicit replay integration test (persistence+search+tls)
+        if: github.ref == 'refs/heads/main'
+        run: |
+          cd backend
+          cargo test --test ws_replay_integration --features "persistence search tls" -- --nocapture
+
+      - name: Release build
+        run: |
+          if [ -z "${{ matrix.include.features }}" ]; then
+            cargo build --release
+          else
+            cargo build --release --features "${{ matrix.include.features }}"
+          fi

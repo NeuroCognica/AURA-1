@@ -1,3 +1,5 @@
+#![cfg(feature = "persistence")]
+
 use aura_backend::storage::RocksStore;
 use tempfile::TempDir;
 
@@ -17,7 +19,9 @@ fn append_and_load_session_meta() {
     // append 3 metadata entries
     for i in 0..3u64 {
         let content = format!("{{\"mode\": \"Mode{}\"}}", i);
-        let seq = store.append_session_meta(sid, &content).expect("append meta");
+        let seq = store
+            .append_session_meta(sid, &content)
+            .expect("append meta");
         assert_eq!(seq, i + 1);
     }
 

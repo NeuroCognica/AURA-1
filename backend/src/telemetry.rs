@@ -1,10 +1,14 @@
-use serde::{Deserialize, Serialize};
-use axum::{extract::ws::{Message, WebSocket, WebSocketUpgrade}, response::IntoResponse, Extension};
+use axum::{
+    extract::ws::{Message, WebSocket, WebSocketUpgrade},
+    response::IntoResponse,
+    Extension,
+};
 use futures_util::StreamExt;
-use tracing::{info, warn};
-use tokio::sync::watch;
-use std::sync::{Arc};
+use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+use tokio::sync::watch;
+use tracing::{info, warn};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct TelemetryEnvelope {
@@ -51,19 +55,21 @@ pub async fn ws_telemetry_handler(
     ws.on_upgrade(move |socket| handle_telemetry_socket(socket, pose_tx, telemetry_counter))
 }
 
-async fn handle_telemetry_socket(mut socket: WebSocket, pose_tx: watch::Sender<Pose>, telemetry_counter: Arc<AtomicU64>) {
+async fn handle_telemetry_socket(
+    mut socket: WebSocket,
+    pose_tx: watch::Sender<Pose>,
+    telemetry_counter: Arc<AtomicU64>,
+) {
     info!("telemetry socket connected");
 
     while let Some(msg) = socket.next().await {
         match msg {
-            Ok(Message::Text(text)) => {
-                match serde_json::from_str::<TelemetryEnvelope>(&text) {
-                    Ok(frame) => {
-                        handle_telemetry_frame(frame, &pose_tx, &telemetry_counter).await;
-                    }
-                    Err(e) => warn!("invalid telemetry frame: {e}"),
+            Ok(Message::Text(text)) => match serde_json::from_str::<TelemetryEnvelope>(&text) {
+                Ok(frame) => {
+                    handle_telemetry_frame(frame, &pose_tx, &telemetry_counter).await;
                 }
-            }
+                Err(e) => warn!("invalid telemetry frame: {e}"),
+            },
             Ok(Message::Binary(_)) => warn!("binary frames not supported (yet)"),
             Ok(Message::Close(_)) => {
                 info!("telemetry socket closed");
@@ -74,7 +80,11 @@ async fn handle_telemetry_socket(mut socket: WebSocket, pose_tx: watch::Sender<P
     }
 }
 
-async fn handle_telemetry_frame(frame: TelemetryEnvelope, pose_tx: &watch::Sender<Pose>, telemetry_counter: &Arc<AtomicU64>) {
+async fn handle_telemetry_frame(
+    frame: TelemetryEnvelope,
+    pose_tx: &watch::Sender<Pose>,
+    telemetry_counter: &Arc<AtomicU64>,
+) {
     tracing::debug!(seq = frame.seq, session = %frame.session, "telemetry received");
     telemetry_counter.fetch_add(1, Ordering::Relaxed);
 

@@ -3,6 +3,8 @@ AURA-1
 
 Backend-authoritative Rust workspace with a stubbed Three.js frontend target.
 
+[![Authority CI](https://github.com/NeuroCognica/AURA-1/actions/workflows/authority-spine-ci.yml/badge.svg)](https://github.com/NeuroCognica/AURA-1/actions/workflows/authority-spine-ci.yml)
+
 Primary stacks
 - Backend (authority): Rust, Axum/Tokio, optional RocksDB/MMR/Tantivy (gated by features).
 - Frontend (client-only): TypeScript/JavaScript, Three.js target (stubbed build).
@@ -66,10 +68,42 @@ Actionable backlog (initial)
 
 Focused code snippets (see `backend/src/main.rs`)
 
-Current Status (2025-12-29):
+## Current Status (2025-01-01):
 
-- Pose pipeline validated end-to-end. See `STATUS_REPORT.md` for run instructions and notes.
+- **Phase 3B Complete:** Quiz collection system implemented with Forever Law covenant (240-probe quiz, 6 API endpoints, automatic profile synthesis).
+- **Test Coverage:** 49+ passing tests (lib), including quiz parser, quiz loader, quiz tagging, and profile synthesis.
 - Backend built with `persistence`, `search`, and `tls` features; TLS configured for local testing with mkcert-generated certs.
+
+### Quiz & Profile System
+
+AURA now includes a 240-question psychometric assessment that generates personalized Mirrorborn profiles. The system honors **Forever Law** (append-only, never delete user data) and maintains full provenance.
+
+**Quiz API Endpoints:**
+- `POST /api/quiz/session/create` — Start new quiz session
+- `POST /api/quiz/answer` — Submit answer (auto-tags with psychological features)
+- `GET /api/quiz/session/:id` — Get session state
+- `GET /api/quiz/session/:id/answers` — Get all answers
+- `POST /api/quiz/session/:id/pause` — Pause (progress preserved forever)
+- `POST /api/quiz/session/:id/resume` — Resume exactly where you left off
+- `POST /api/profile/generate` — Generate Mirrorborn profile from completed quiz (240 answers)
+
+**Profile Generation Flow:**
+1. User completes 240-probe quiz (answers saved to RocksDB append-only)
+2. Each answer tagged with psychological features (agency, detail orientation, emotional awareness, collaboration, temporal focus)
+3. System accumulates feature weights across all 240 answers
+4. Primary/secondary archetypes determined from weight patterns (Architect, Empath, Explorer, Mentor, Jester, Technician, Sentinel)
+5. Profile written atomically to `data/profiles/{username}.json`
+6. AI interactions optionally tuned based on user's archetype (graceful absence if no profile)
+
+See [AURA_PROJECT_REPORT.md](AURA_PROJECT_REPORT.md) for detailed architecture and covenant guarantees.
+
+Milestone: v0.4.4-orchestrator-safe-cognition
+
+- Commit: c2dc61ac
+- Summary: Completed Phase 4 Step 4 — adapter registry, config-driven LLM wiring, Technician adapter, and a canonical DryRun-only execution chokepoint. Adapters are constructed from validated `orchestrator.json` and the LLM client is dependency-injected (no global). Missing archetypes fail startup (fail-fast).
+- CI status: Workspace tests, orchestrator no-default-features, backend feature-matrix, release build, and frontend build all passed locally. Tag `v0.4.4-orchestrator-safe-cognition` pushed to origin.
+
+Note: The system remains in DryRun-only mode; `ExecutionMode::Live` is intentionally disabled until Phase 4 Step 5 authorization and safety checks are complete.
 
 Quick sensor run commands (developer):
 
@@ -86,6 +120,50 @@ cargo run --features "persistence search tls"
 # In separate shells from repo root:
 cd sensors; python head_tracker.py
 cd sensors; python pose_sub.py
+```
+
+## Workbench Launcher (Desktop Control Interface)
+
+The **workbench** is an Electron-based desktop UI for interacting with AURA archetypes, monitoring system status, and managing conversations. The **Python launcher** orchestrates the full stack startup sequence.
+
+### Quick Start (Python Launcher)
+
+```powershell
+cd launcher
+python launcher.py
+```
+
+The launcher will start services in sequence:
+1. **Ollama** (port 11434) - AI inference engine
+2. **Backend** (port 8080) - Rust authority server
+3. **Workbench Vite** (port 5173) - React dev server
+4. **Electron** - Desktop window loads workbench UI
+
+### Architecture: Three Distinct Components
+
+- **Backend** (`/backend/`) — Rust authority server (Axum, RocksDB, Tantivy, AI orchestration)
+- **Workbench** (`/workbench/`) — Electron desktop UI (React, Tailwind, archetype selector, chat interface)
+- **Frontend** (`/frontend/`) — iOS-compatible Three.js web client (separate from workbench, for VR/AR cockpit)
+
+**Note:** The workbench is the desktop control interface; the frontend is the mobile/web 3D client. These are separate applications.
+
+### Workbench Configuration
+
+The launcher configuration is in `launcher/launcher.config.json`. Key services:
+- `backend`: Cargo run with persistence/search/tls features
+- `vite`: Workbench dev server (React UI)
+- `ollama`: AI inference engine
+- `electron`: Desktop window wrapper
+
+### Manual Workbench Development
+
+To run workbench independently (without Python launcher):
+
+```powershell
+cd workbench
+npm install
+npm run dev              # Terminal 1: Vite dev server
+npm run electron:launch  # Terminal 2: Electron window
 ```
 
 See `STATUS_REPORT.md` for more details and next steps.
@@ -123,6 +201,12 @@ Contribution & coding guidelines
 
 Where to go next
 - See `aura1.md` for the architecture report and `STATUS_REPORT.md` for operational run instructions and sensor wiring.
+
+CI guarantees
+- **CI coverage:** The repository enforces integration tests for the replay semantics and persistence on pushes to `main` via GitHub Actions.
+- **Windows persistence checks:** The CI matrix includes Windows persistence runs; failures should be investigated via the workflow logs and reproduced locally.
+
+If you modify persistence or replay code, add tests and ensure the `ws_replay_integration` test remains green in CI.
 
 ```
 - RocksDB + MMR scaffold (feature `persistence`):

@@ -1,3 +1,5 @@
+#![cfg(feature = "persistence")]
+
 use aura_backend::rocksdb_store::RocksDBStore;
 use tempfile::TempDir;
 
@@ -17,7 +19,10 @@ fn mmr_proof_verification_roundtrip() {
 
     // pick an id to prove
     let last = store.get_last_id().expect("last id");
-    let (leaf, peaks) = store.prove(last).expect("prove returned").expect("proof exists");
+    let (leaf, peaks) = store
+        .prove(last)
+        .expect("prove returned")
+        .expect("proof exists");
 
     // recompute root from peaks (bagging)
     let mut concat = Vec::new();
@@ -29,7 +34,10 @@ fn mmr_proof_verification_roundtrip() {
     // get stored root
     let stored = store.get_root().expect("get root").expect("root exists");
 
-    assert_eq!(recomputed_root, stored, "recomputed root matches stored mmr_root");
+    assert_eq!(
+        recomputed_root, stored,
+        "recomputed root matches stored mmr_root"
+    );
 
     // Verify leaf is consistent with stored log bytes
     let le = store.get_log(last).expect("get log").expect("exists");

@@ -3,7 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "build": "node ./scripts/build.js",
+    "dev": "npx vite",
+    "start": "npx vite",
+    "build": "npx vite build",
+    "preview": "npx vite preview",
     "test": "jest"
   },
   "devDependencies": {

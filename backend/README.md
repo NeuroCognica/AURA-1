@@ -101,3 +101,13 @@ mkcert aura.local 192.168.X.X
 ---
 
 Generated on: 2025-12-29
+
+## Archetype activation route
+
+This backend exposes a transport-agnostic library handler for archetype activation and a thin HTTP route for convenience:
+
+- Library handler: `aura_backend::archetype_api::activate_archetype_handler` — builds the activation payload and publishes council broadcasts.
+- HTTP route: `POST /api/archetype/activate` — forwards to the library handler. The route is wired in `backend/src/main.rs` and intentionally performs no additional logic.
+
+Use the route for quick smoke checks; prefer the library API for programmatic activation (CLI, Launcher, or tests).
+

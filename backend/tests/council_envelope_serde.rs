@@ -1,4 +1,4 @@
-use aura_backend::council_verdict::{CouncilMsg, CouncilVerdict, make_council_envelope};
+use aura_backend::council_verdict::{make_council_envelope, CouncilMsg, CouncilVerdict};
 use serde_json::Value;
 
 #[test]

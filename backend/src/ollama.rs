@@ -1,13 +1,13 @@
-use axum::{extract::Json, Extension};
+use crate::sentinel::{format_sentinel_block, sentinel_evaluate, sentinel_speak, SentinelDecision};
+use crate::storage::RocksStore;
 use axum::http::StatusCode;
+use axum::{extract::Json, Extension};
+use chrono;
 use futures::{Stream, StreamExt};
-use std::pin::Pin;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use chrono;
+use std::pin::Pin;
 use std::sync::Arc;
-use crate::storage::RocksStore;
-use crate::sentinel::{sentinel_evaluate, sentinel_speak, format_sentinel_block, SentinelDecision};
 use tokio::sync::broadcast;
 use tracing::warn;
 
@@ -45,18 +45,27 @@ struct OllamaMsg {
     content: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct ChatRequest {
     pub session_id: String,
+
+    #[serde(alias = "prompt")]
     pub text: String,
+
     #[serde(default)]
     pub ollama_url: Option<String>,
+
     #[serde(default)]
     pub model: Option<String>,
+
     #[serde(default)]
     pub system: Option<String>,
+
     #[serde(default)]
     pub retrieval: Option<String>,
+
+    #[serde(default)]
+    pub archetype: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -90,14 +99,34 @@ impl SessionMode {
 
 fn options_for_mode(mode: &SessionMode) -> OllamaGenerateOptions {
     match mode {
-        SessionMode::Code => OllamaGenerateOptions { num_ctx: Some(8192), temperature: Some(0.05), top_p: Some(0.9), num_gpu: Some(1) },
-        SessionMode::Planning => OllamaGenerateOptions { num_ctx: Some(4096), temperature: Some(0.2), top_p: Some(0.95), num_gpu: Some(1) },
-        SessionMode::Voice => OllamaGenerateOptions { num_ctx: Some(2048), temperature: Some(0.6), top_p: Some(0.98), num_gpu: Some(1) },
-        SessionMode::Unknown => OllamaGenerateOptions { num_ctx: Some(2048), temperature: Some(0.2), top_p: Some(0.95), num_gpu: Some(1) },
+        SessionMode::Code => OllamaGenerateOptions {
+            num_ctx: Some(8192),
+            temperature: Some(0.05),
+            top_p: Some(0.9),
+            num_gpu: Some(1),
+        },
+        SessionMode::Planning => OllamaGenerateOptions {
+            num_ctx: Some(4096),
+            temperature: Some(0.2),
+            top_p: Some(0.95),
+            num_gpu: Some(1),
+        },
+        SessionMode::Voice => OllamaGenerateOptions {
+            num_ctx: Some(2048),
+            temperature: Some(0.6),
+            top_p: Some(0.98),
+            num_gpu: Some(1),
+        },
+        SessionMode::Unknown => OllamaGenerateOptions {
+            num_ctx: Some(2048),
+            temperature: Some(0.2),
+            top_p: Some(0.95),
+            num_gpu: Some(1),
+        },
     }
 }
 
-async fn stream_ollama_chat(
+pub async fn stream_ollama_chat(
     ollama_url: &str,
     model: &str,
     system: &str,
@@ -131,7 +160,12 @@ async fn stream_ollama_chat(
         model: model.into(),
         prompt,
         stream: true,
-        options: Some(OllamaGenerateOptions { num_ctx: Some(2048), temperature: Some(0.2), top_p: Some(0.95), num_gpu: Some(1) }),
+        options: Some(OllamaGenerateOptions {
+            num_ctx: Some(2048),
+            temperature: Some(0.2),
+            top_p: Some(0.95),
+            num_gpu: Some(1),
+        }),
     };
 
     let client = Client::new();
@@ -264,11 +298,13 @@ async fn stream_ollama_chat_with_options(
 /// Persistence-enabled `/api/chat` handler. Requires `persistence` feature.
 #[cfg(feature = "persistence")]
 #[axum::debug_handler]
- pub async fn chat_handler(
+pub async fn chat_handler(
     Extension(store): Extension<Arc<RocksStore>>,
     Extension(ai_bcast): Extension<broadcast::Sender<String>>,
     Extension(council_bcast): Extension<broadcast::Sender<String>>,
-    Extension(council_bcast_typed): Extension<broadcast::Sender<crate::council_verdict::CouncilEnvelope>>,
+    Extension(council_bcast_typed): Extension<
+        broadcast::Sender<crate::council_verdict::CouncilEnvelope>,
+    >,
     Extension(gen_mgr): Extension<Arc<crate::generation_manager::GenerationManager>>,
     Json(req): Json<ChatRequest>,
 ) -> impl axum::response::IntoResponse {
@@ -277,16 +313,19 @@ async fn stream_ollama_chat_with_options(
     // 1. persist user message
     if let Err(e) = store.append_chat_msg(&req.session_id, "user", &req.text) {
         warn!(%e, "failed to append user message");
-        return (StatusCode::INTERNAL_SERVER_ERROR, format!("append error: {}", e));
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("append error: {}", e),
+        );
     }
 
     // 1.5 Appeal pre-check: load appeal state for this session. If the session is AwaitingUser, return the stored verdict/state.
-    match crate::appeal::load_appeal_state(&store, &req.session_id) {
+    match crate::appeal::load_appeal_state(&*store, &req.session_id) {
         Ok(st) => {
             match st {
                 crate::council_verdict::AppealState::AwaitingUser { ref verdict_id, .. } => {
                     // try to load the last verdict; if present, return it with 409 Conflict
-                    match crate::appeal::load_verdict(&store, &req.session_id, &verdict_id.0) {
+                    match crate::appeal::load_verdict(&*store, &req.session_id, &verdict_id.0) {
                         Ok(v) => {
                             let resp = serde_json::json!({"state": &st, "last_verdict": v});
                             return (StatusCode::CONFLICT, resp.to_string());
@@ -324,7 +363,11 @@ async fn stream_ollama_chat_with_options(
 
     let history: Vec<ChatMsg> = recent
         .iter()
-        .map(|le| ChatMsg { role: le.speaker.clone(), content: le.content.clone(), ts: le.timestamp_ms })
+        .map(|le| ChatMsg {
+            role: le.speaker.clone(),
+            content: le.content.clone(),
+            ts: le.timestamp_ms,
+        })
         .collect();
 
     // 3. start a new generation and Ollama stream
@@ -345,7 +388,10 @@ async fn stream_ollama_chat_with_options(
 
     // 3. start Ollama stream
     // Prepare Ollama call parameters (used by sentinel speak if needed)
-    let ollama_url = req.ollama_url.as_deref().unwrap_or("http://127.0.0.1:11434");
+    let ollama_url = req
+        .ollama_url
+        .as_deref()
+        .unwrap_or("http://127.0.0.1:11434");
     let model = req.model.as_deref().unwrap_or("deepseek-coder:6.7b");
     let system = req.system.as_deref().unwrap_or("AURA persona");
     let retrieval = req.retrieval.clone();
@@ -363,7 +409,15 @@ async fn stream_ollama_chat_with_options(
             }
             let _ = ai_bcast.send(block.clone());
             // also persist and broadcast to council channel as a SentinelNotice
-            crate::broadcast::broadcast_council(&store, &council_bcast, Some(&council_bcast_typed), &req.session_id, "sentinel_notice", serde_json::json!({"reason": reason, "level": "warning"}), Some(&gen_mgr));
+            crate::broadcast::broadcast_council(
+                &store,
+                &council_bcast,
+                Some(&council_bcast_typed),
+                &req.session_id,
+                "sentinel_notice",
+                serde_json::json!({"reason": reason, "level": "warning"}),
+                Some(&gen_mgr),
+            );
             // continue to main generation
         }
         SentinelDecision::RequireConsent(reason) => {
@@ -375,7 +429,15 @@ async fn stream_ollama_chat_with_options(
                     let _ = store.append_chat_msg(&req.session_id, "sentinel", &block);
                     let _ = ai_bcast.send(block.clone());
                     // persist + broadcast council notice
-                    crate::broadcast::broadcast_council(&store, &council_bcast, Some(&council_bcast_typed), &req.session_id, "sentinel_speech", serde_json::json!({"speech": block}), Some(&gen_mgr));
+                    crate::broadcast::broadcast_council(
+                        &store,
+                        &council_bcast,
+                        Some(&council_bcast_typed),
+                        &req.session_id,
+                        "sentinel_speech",
+                        serde_json::json!({"speech": block}),
+                        Some(&gen_mgr),
+                    );
                     return (StatusCode::OK, block);
                 }
                 Err(e) => {
@@ -383,7 +445,15 @@ async fn stream_ollama_chat_with_options(
                     let block = format_sentinel_block(&reason, "REQUIRE_CONSENT");
                     let _ = store.append_chat_msg(&req.session_id, "sentinel", &block);
                     let _ = ai_bcast.send(block.clone());
-                    crate::broadcast::broadcast_council(&store, &council_bcast, Some(&council_bcast_typed), &req.session_id, "sentinel_notice", serde_json::json!({"reason": reason, "level": "require_consent"}), Some(&gen_mgr));
+                    crate::broadcast::broadcast_council(
+                        &store,
+                        &council_bcast,
+                        Some(&council_bcast_typed),
+                        &req.session_id,
+                        "sentinel_notice",
+                        serde_json::json!({"reason": reason, "level": "require_consent"}),
+                        Some(&gen_mgr),
+                    );
                     return (StatusCode::OK, block);
                 }
             }
@@ -392,16 +462,28 @@ async fn stream_ollama_chat_with_options(
             let block = format_sentinel_block(&reason, "DENY");
             let _ = store.append_chat_msg(&req.session_id, "sentinel", &block);
             let _ = ai_bcast.send(block.clone());
-            crate::broadcast::broadcast_council(&store, &council_bcast, Some(&council_bcast_typed), &req.session_id, "verdict", serde_json::json!({"final_state": "deny", "reason": reason}), Some(&gen_mgr));
+            crate::broadcast::broadcast_council(
+                &store,
+                &council_bcast,
+                Some(&council_bcast_typed),
+                &req.session_id,
+                "verdict",
+                serde_json::json!({"final_state": "deny", "reason": reason}),
+                Some(&gen_mgr),
+            );
             return (StatusCode::FORBIDDEN, block);
         }
     }
 
-    let mut stream = match stream_ollama_chat(ollama_url, model, system, retrieval, &history).await {
+    let mut stream = match stream_ollama_chat(ollama_url, model, system, retrieval, &history).await
+    {
         Ok(s) => s,
         Err(e) => {
             warn!(%e, "failed to start ollama stream");
-            return (StatusCode::INTERNAL_SERVER_ERROR, format!("stream error: {}", e));
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("stream error: {}", e),
+            );
         }
     };
 
@@ -435,7 +517,10 @@ async fn stream_ollama_chat_with_options(
     // 5. persist assistant message
     if let Err(e) = store.append_chat_msg(&req.session_id, "assistant", &assistant_buf) {
         warn!(%e, "failed to append assistant message");
-        return (StatusCode::INTERNAL_SERVER_ERROR, format!("append error: {}", e));
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("append error: {}", e),
+        );
     }
 
     (StatusCode::OK, String::new())

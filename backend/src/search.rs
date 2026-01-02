@@ -6,7 +6,7 @@ pub mod __search_impl {
     use std::path::Path;
     use tantivy::collector::TopDocs;
     use tantivy::query::QueryParser;
-    use tantivy::schema::{Schema, Field, TEXT, STORED, FAST, STRING};
+    use tantivy::schema::{Field, Schema, FAST, STORED, STRING, TEXT};
     use tantivy::{doc, Index, IndexWriter};
 
     #[derive(Clone)]

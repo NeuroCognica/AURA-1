@@ -1,15 +1,18 @@
-use std::sync::Arc;
-use tokio::net::TcpListener;
-use axum::{Router, routing::get, extract::Extension};
+#![cfg(all(feature = "persistence", feature = "tls"))]
+
+use aura_backend::{broadcast, council_verdict, storage};
+use axum::{extract::Extension, routing::get, Router};
 use axum_server::Server;
 use futures_util::{SinkExt, StreamExt};
+
+use std::sync::Arc;
 use tempfile::tempdir;
-use aura_backend::{broadcast, council_verdict, storage};
+use tokio::net::TcpListener;
 
 #[tokio::test]
 async fn ws_replay_end_to_end() -> anyhow::Result<()> {
-    use aura_backend::storage::RocksStore;
     use aura_backend::council_verdict::{make_council_envelope, CouncilMsg};
+    use aura_backend::storage::RocksStore;
     use tokio_tungstenite::tungstenite::Message as WsMessage;
 
     // prepare persistence store
@@ -19,18 +22,25 @@ async fn ws_replay_end_to_end() -> anyhow::Result<()> {
 
     // channels
     let (council_bcast_tx, _rx1) = tokio::sync::broadcast::channel::<String>(256);
-    let (council_bcast_typed_tx, _rx2) = tokio::sync::broadcast::channel::<aura_backend::council_verdict::CouncilEnvelope>(256);
+    let (council_bcast_typed_tx, _rx2) =
+        tokio::sync::broadcast::channel::<aura_backend::council_verdict::CouncilEnvelope>(256);
 
     // Persist N=5 typed envelopes synchronously so replay will see them.
     let sid = "session-test";
     for i in 1..=5u64 {
         let payload = serde_json::json!({"i": i});
         // Build a typed Notice envelope for simplicity
-        let env_bytes = serde_json::to_vec(&make_council_envelope(sid, None, i, CouncilMsg::Notice(payload.clone())))?;
+        let env_bytes = serde_json::to_vec(&make_council_envelope(
+            sid,
+            None,
+            i,
+            CouncilMsg::Notice(payload.clone()),
+        ))?;
         // Use storage helper to persist with seq i (helper will assign seq)
         let seq = store.append_council_envelope_with(sid, |_assigned_seq| env_bytes.clone())?;
         // Also append a legacy chat message for backward compatibility
-        let chat = serde_json::json!({"kind": "verdict", "session_id": sid, "payload": payload}).to_string();
+        let chat = serde_json::json!({"kind": "verdict", "session_id": sid, "payload": payload})
+            .to_string();
         let _ = council_bcast_tx.send(chat);
         assert_eq!(seq >= 1, true);
     }
@@ -84,7 +94,15 @@ async fn ws_replay_end_to_end() -> anyhow::Result<()> {
     }
 
     // Now send a live council message and ensure client receives it after replay
-    broadcast::broadcast_council(&store, &council_bcast_tx, Some(&council_bcast_typed_tx), sid, "verdict", serde_json::json!({"i": 6}), None);
+    broadcast::broadcast_council(
+        &store,
+        &council_bcast_tx,
+        Some(&council_bcast_typed_tx),
+        sid,
+        "verdict",
+        serde_json::json!({"i": 6}),
+        None,
+    );
 
     // receive seq 6 (skip legacy immediate message if present; typed envelope is sent after persistence)
     use std::time::{Duration, Instant};
@@ -112,7 +130,9 @@ async fn ws_replay_end_to_end() -> anyhow::Result<()> {
             _ => continue,
         }
     }
-    if !found { panic!("did not receive typed live envelope within timeout"); }
+    if !found {
+        panic!("did not receive typed live envelope within timeout");
+    }
 
     Ok(())
 }
